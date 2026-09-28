@@ -41,22 +41,18 @@ final class PermissionsModel: ObservableObject {
 @MainActor
 final class SettingsWindowController: NSObject, NSWindowDelegate {
     enum Pane: String, CaseIterable {
-        case general, account, writing, history
+        case general, account
         var title: String { rawValue.capitalized }
         var symbol: String {
             switch self {
             case .general: return "gearshape"
             case .account: return "person.crop.circle"
-            case .writing: return "text.quote"
-            case .history: return "clock.arrow.circlepath"
             }
         }
         static func from(_ s: String?) -> Pane? {
             switch s {
             case "ai", "account": return .account
             case "setup", "general": return .general
-            case "writing", "vocabulary": return .writing
-            case "history": return .history
             default: return nil
             }
         }
@@ -85,8 +81,6 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             switch pane {
             case .general: host = hosting(GeneralPane())
             case .account: host = hosting(AccountPane())
-            case .writing: host = hosting(WritingPane())
-            case .history: host = hosting(HistoryPane())
             }
             let item = NSTabViewItem(viewController: host)
             item.label = pane.title
@@ -342,78 +336,7 @@ private struct EngineCard: View {
     }
 }
 
-// MARK: - Writing
-
-struct WritingPane: View {
-    @ObservedObject private var prefs = Prefs.shared
-    @State private var newTerm = ""
-
-    var body: some View {
-        Form {
-            Section {
-                Toggle(isOn: $prefs.cleanupEnabled) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Clean up what you say")
-                        Text("Removes “um” and “like”, applies corrections (“at 2, actually 3” → “at 3”), adds punctuation and lists.")
-                            .font(.system(size: 11.5)).foregroundColor(.secondary)
-                    }
-                }
-                Toggle(isOn: $prefs.useContext) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Use the text before your cursor")
-                        Text("Continues sentences naturally. Sends up to 600 characters; password fields are never read.")
-                            .font(.system(size: 11.5)).foregroundColor(.secondary)
-                    }
-                }
-            } header: { Text("Cleanup") }
-
-            Section {
-                VStack(alignment: .leading, spacing: 10) {
-                    FlowLayout(spacing: 6) {
-                        ForEach(prefs.vocabularyTerms, id: \.self) { term in
-                            TermChip(term: term) { remove(term) }
-                                .transition(.iconSwap)
-                        }
-                    }
-                    .animation(Brand.spring, value: prefs.vocabularyTerms)
-                    HStack {
-                        TextField("", text: $newTerm, prompt: Text("Add a name, product or word…"))
-                            .labelsHidden()
-                            .textFieldStyle(.roundedBorder)
-                            .onSubmit(add)
-                        Button("Add", action: add).disabled(newTerm.trimmingCharacters(in: .whitespaces).isEmpty)
-                    }
-                }
-                .padding(.vertical, 4)
-            } header: { Text("Vocabulary") } footer: {
-                Text("Murmur listens for these and spells them your way.").font(.system(size: 11)).foregroundColor(.secondary)
-            }
-
-            Section {
-                StyleRow(symbol: "bubble.left.and.bubble.right.fill", title: "Messages", detail: "Slack, WhatsApp, Messages", sample: "sounds good, see you at 3")
-                StyleRow(symbol: "envelope.fill", title: "Email", detail: "Mail, Gmail, Outlook", sample: "Complete sentences and paragraphs.")
-                StyleRow(symbol: "chevron.left.forwardslash.chevron.right", title: "Code", detail: "Xcode, VS Code, Cursor, Terminal", sample: "git push --force-with-lease")
-                StyleRow(symbol: "sparkles", title: "AI prompts", detail: "ChatGPT, Claude, Codex", sample: "Clear, structured requirements.")
-                StyleRow(symbol: "doc.text.fill", title: "Docs & notes", detail: "Notion, Notes, Google Docs", sample: "Well-formed prose and lists.")
-            } header: { Text("Adapts to where you type") }
-        }
-        .formStyle(.grouped)
-        .frame(width: 620, height: 640)
-    }
-
-    private func add() {
-        let t = newTerm.trimmingCharacters(in: .whitespaces)
-        guard !t.isEmpty, !prefs.vocabularyTerms.contains(t) else { newTerm = ""; return }
-        prefs.vocabulary = (prefs.vocabularyTerms + [t]).joined(separator: "\n")
-        newTerm = ""
-    }
-
-    private func remove(_ t: String) {
-        prefs.vocabulary = prefs.vocabularyTerms.filter { $0 != t }.joined(separator: "\n")
-    }
-}
-
-private struct TermChip: View {
+struct TermChip: View {
     let term: String
     let onRemove: () -> Void
     @State private var hover = false
@@ -434,7 +357,7 @@ private struct TermChip: View {
     }
 }
 
-private struct StyleRow: View {
+struct StyleRow: View {
     let symbol: String
     let title: String
     let detail: String
@@ -483,6 +406,7 @@ struct FlowLayout: Layout {
 // MARK: - History
 
 struct HistoryPane: View {
+    var embedded = false
     @ObservedObject private var history = HistoryStore.shared
     @State private var query = ""
 
@@ -505,12 +429,14 @@ struct HistoryPane: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                StatCard(value: history.totalWords.formatted(), label: "words")
-                StatCard(value: history.items.count.formatted(), label: "dictations")
-                StatCard(value: String(format: "%.0f min", history.minutesSaved), label: "saved vs. typing")
+            if !embedded {
+                HStack(spacing: 12) {
+                    StatCard(value: history.totalWords.formatted(), label: "words")
+                    StatCard(value: history.items.count.formatted(), label: "dictations")
+                    StatCard(value: String(format: "%.0f min", history.minutesSaved), label: "saved vs. typing")
+                }
+                .padding(.horizontal, 20).padding(.top, 18)
             }
-            .padding(.horizontal, 20).padding(.top, 18)
 
             HStack {
                 Image(systemName: "magnifyingglass").foregroundColor(.secondary)
@@ -524,7 +450,7 @@ struct HistoryPane: View {
             }
             .padding(.horizontal, 10).frame(height: 32)
             .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.primary.opacity(0.06)))
-            .padding(.horizontal, 20).padding(.vertical, 14)
+            .padding(.horizontal, embedded ? 32 : 20).padding(.vertical, 14)
 
             if filtered.isEmpty {
                 VStack(spacing: 12) {
@@ -558,11 +484,11 @@ struct HistoryPane: View {
                             }
                         }
                     }
-                    .padding(.horizontal, 20).padding(.bottom, 20)
+                    .padding(.horizontal, embedded ? 32 : 20).padding(.bottom, 20)
                 }
             }
         }
-        .frame(width: 620, height: 620)
+        .frame(width: embedded ? nil : 620, height: embedded ? nil : 620)
     }
 }
 

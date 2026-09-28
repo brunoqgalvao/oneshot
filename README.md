@@ -6,6 +6,9 @@ Users sign up for a free Murmur account inside the app (email + password); the [
 
 ## Use
 
+Opening Murmur shows its home window: weekly words, time saved, speaking speed, recent dictations, plus History, Dictionary and Style pages. Settings (⌘,) holds the dictation key, microphone, permissions and account.
+
+
 | Keys | What happens |
 | --- | --- |
 | Hold fn | Dictate; release to insert |
@@ -34,7 +37,7 @@ Requires the Xcode Command Line Tools (Swift 5.9+), macOS 13+.
 ./build.sh --open
 ```
 
-The app talks to `http://localhost:8787` until the server is deployed. Run it locally with `cd server && OPENAI_API_KEY=sk-... bun start`, or deploy with `server/deploy.sh`, which writes the public URL to `.server-url` and rebuilds the app against it.
+The server runs at https://murmur-dictation.fly.dev (Fly.io, São Paulo); `build.sh` reads the URL from `.server-url`. Run it locally with `cd server && OPENAI_API_KEY=sk-... bun start`, or deploy with `server/deploy.sh`, which writes the public URL to `.server-url` and rebuilds the app against it.
 
 The first build creates a self-signed identity in `.signing/` so macOS keeps the Accessibility and Microphone permissions across rebuilds.
 

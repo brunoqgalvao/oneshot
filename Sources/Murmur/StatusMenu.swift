@@ -75,6 +75,8 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             menu.addItem(.separator())
         }
 
+        menu.addItem(make("Open Murmur", "macwindow", #selector(openMain)))
+        menu.addItem(.separator())
         menu.addItem(make(controller.isRecording ? "Stop Dictation" : "Start Dictation", controller.isRecording ? "stop.circle" : "mic", #selector(toggle)))
         if !controller.isRecording { menu.addItem(make("Command Mode", "sparkles", #selector(command))) }
         if controller.canRetry { menu.addItem(make("Retry Last Dictation", "arrow.clockwise", #selector(retry))) }
@@ -131,6 +133,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     @objc private func command() { controller.startCommand() }
     @objc private func retry() { controller.retryLast() }
     @objc private func pasteLast() { controller.pasteLast() }
+    @objc private func openMain() { AppDelegate.shared?.showMain(.home) }
     @objc private func openSettings() { controller.openSettings?("general") }
     @objc private func openSetup() { AppDelegate.shared?.showOnboarding(step: nil) }
     @objc private func quit() { NSApp.terminate(nil) }

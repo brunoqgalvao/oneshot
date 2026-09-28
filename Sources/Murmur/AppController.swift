@@ -321,7 +321,8 @@ final class AppController: ObservableObject {
             let pasted = debugUnsafe ? { Paster.copy(text); return false }() : insert(text)
             let latency = Date().timeIntervalSince(releasedAt)
             history.add(Dictation(raw: raw, text: text.trimmingCharacters(in: .whitespaces), app: s.focus.appName,
-                                  mode: out.mode, engine: out.engine, audioSeconds: rec.duration, latency: latency))
+                                  mode: out.mode, engine: out.engine, audioSeconds: rec.duration, latency: latency,
+                                  bundleID: s.focus.bundleID))
             try? FileManager.default.removeItem(at: url)
             lastFailure = nil
             canRetry = false

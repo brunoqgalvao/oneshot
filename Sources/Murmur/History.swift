@@ -10,6 +10,7 @@ struct Dictation: Codable, Identifiable, Equatable {
     var engine: String
     var audioSeconds: Double
     var latency: Double       // seconds from key release to text inserted
+    var bundleID: String? = nil
     var words: Int { text.split(whereSeparator: { $0.isWhitespace }).count }
 }
 
@@ -42,6 +43,37 @@ final class HistoryStore: ObservableObject {
     /// Minutes saved vs. typing at 40 wpm.
     var minutesSaved: Double {
         max(0, Double(totalWords) / 40.0 - totalSpeakingSeconds / 60.0)
+    }
+}
+
+extension HistoryStore {
+    /// Words per day for the last `days` days, oldest first.
+    func dailyWords(days: Int) -> [(day: Date, words: Int)] {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        return (0..<days).reversed().map { offset in
+            let day = cal.date(byAdding: .day, value: -offset, to: today)!
+            let words = items.filter { cal.isDate($0.date, inSameDayAs: day) }.reduce(0) { $0 + $1.words }
+            return (day, words)
+        }
+    }
+
+    var wordsPerMinute: Int? {
+        let d = items.filter { $0.mode == "dictate" }
+        let minutes = d.reduce(0) { $0 + $1.audioSeconds } / 60
+        guard minutes > 0.1 else { return nil }
+        return Int((Double(d.reduce(0) { $0 + $1.words }) / minutes).rounded())
+    }
+
+    /// Consecutive days (ending today or yesterday) with at least one dictation.
+    var streak: Int {
+        let cal = Calendar.current
+        let days = Set(items.map { cal.startOfDay(for: $0.date) })
+        var day = cal.startOfDay(for: Date())
+        if !days.contains(day) { day = cal.date(byAdding: .day, value: -1, to: day)! }
+        var n = 0
+        while days.contains(day) { n += 1; day = cal.date(byAdding: .day, value: -1, to: day)! }
+        return n
     }
 }
 

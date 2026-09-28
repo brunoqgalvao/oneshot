@@ -40,6 +40,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusMenu: StatusMenu?
     private let settings = SettingsWindowController()
     private let onboarding = OnboardingWindowController()
+    private let main = MainWindowController()
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         AppDelegate.shared = self
@@ -71,8 +72,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Opening Murmur again (Spotlight, Finder, Launchpad) shows Settings. This is
     /// the way back in when a crowded menu bar hides the status icon behind the notch.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if !flag { showSettings(tab: "general") }
+        if !flag { showMain() }
         return true
+    }
+
+    func showMain(_ page: MainNav.Page? = nil, activate: Bool = true) {
+        main.show(page, activate: activate)
     }
 
     func showOnboarding(step: OnboardingModel.Step?, activate: Bool = true) {
@@ -90,10 +95,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func finishOnboarding() {
         onboarding.close()
+        showMain(.home)
         controller.hud.show(.notice("Murmur is in your menu bar. Hold \(Prefs.shared.trigger.short) anywhere."), autoHideAfter: 3.5)
     }
 
     func showSettings(tab: String?, activate: Bool = true) {
+        switch tab {
+        case "history": showMain(.history, activate: activate); return
+        case "writing", "vocabulary", "dictionary": showMain(.dictionary, activate: activate); return
+        case "style": showMain(.style, activate: activate); return
+        default: break
+        }
         settings.show(SettingsWindowController.Pane.from(tab) ?? .general, activate: activate)
     }
 
@@ -111,7 +123,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "setup", "onboarding":
             let step = path.count > 1 ? OnboardingModel.Step.allCases.first { "\($0)" == path[1] } : nil
             showOnboarding(step: step ?? .welcome, activate: !quiet)
-        case "close-settings": settings.close(); onboarding.close()
+        case "home", "main":
+            showMain(path.count > 1 ? MainNav.Page(rawValue: path[1]) : .home, activate: !quiet)
+        case "close-settings": settings.close(); onboarding.close(); main.close()
         case "open-menu": statusMenu?.showBriefly(seconds: Double(path.count > 1 ? path[1] : "3") ?? 3)
         case "demo": Demo.show(path.count > 1 ? path[1] : "listening", hud: controller.hud)
         default: break
