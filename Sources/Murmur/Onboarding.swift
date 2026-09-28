@@ -269,6 +269,7 @@ private struct DemoStage: View {
 private struct AccountStep: View {
     @ObservedObject var model: OnboardingModel
     @ObservedObject private var prefs = Prefs.shared
+    @ObservedObject private var account = Account.shared
     var body: some View {
         StepScaffold(title: prefs.engine == .openAI ? "Add your OpenAI key" : "Create your free account",
                      subtitle: prefs.engine == .openAI
@@ -285,7 +286,7 @@ private struct AccountStep: View {
                             .disabled(prefs.effectiveAPIKey == nil)
                     }
                 } else {
-                    AccountForm(onSuccess: { model.next() })
+                    AccountForm()
                 }
             }
             .frame(width: 340)
@@ -295,6 +296,10 @@ private struct AccountStep: View {
             }
             .buttonStyle(.link)
             .font(.system(size: 12))
+        }
+        // Email or Google: move on as soon as there's a session.
+        .onChange(of: account.email) { email in
+            if email != nil && prefs.engine == .cloud { model.next() }
         }
     }
 }

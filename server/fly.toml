@@ -4,6 +4,7 @@ primary_region = "gru"
 [env]
   PORT = "8080"
   DATABASE_PATH = "/data/murmur.db"
+  PUBLIC_URL = "https://murmur-dictation.fly.dev"
 
 [[mounts]]
   source = "murmur_data"

@@ -10,4 +10,9 @@ export const config = {
   transcribeModel: process.env.TRANSCRIBE_MODEL ?? "gpt-4o-transcribe",
   cleanupModel: process.env.CLEANUP_MODEL ?? "gpt-5.4-mini",
   commandModel: process.env.COMMAND_MODEL ?? "gpt-5.4-mini",
+  publicURL: (process.env.PUBLIC_URL ?? "http://localhost:8787").replace(/\/$/, ""),
+  googleClientId: process.env.GOOGLE_CLIENT_ID ?? "",
+  googleClientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
+  googleAuthURL: process.env.GOOGLE_AUTH_URL ?? "https://accounts.google.com/o/oauth2/v2/auth",
+  googleTokenURL: process.env.GOOGLE_TOKEN_URL ?? "https://oauth2.googleapis.com/token",
 };

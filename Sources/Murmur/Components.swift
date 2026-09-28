@@ -270,6 +270,22 @@ struct AccountForm: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+            GoogleButton(waiting: account.waitingForGoogle) { account.signInWithGoogle() }
+            if account.waitingForGoogle {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text("Finish signing in in your browser…").font(.system(size: 12)).foregroundColor(.secondary)
+                    Spacer()
+                    Button("Cancel") { account.cancelGoogle() }.buttonStyle(.link).font(.system(size: 12))
+                }
+                .transition(.opacity)
+            }
+            HStack(spacing: 10) {
+                Rectangle().fill(Color.primary.opacity(0.1)).frame(height: 1)
+                Text("or use email").font(.system(size: 11)).foregroundColor(.secondary).fixedSize()
+                Rectangle().fill(Color.primary.opacity(0.1)).frame(height: 1)
+            }
+            .padding(.vertical, 2)
             Picker("", selection: $create) {
                 Text("Create account").tag(true)
                 Text("Sign in").tag(false)
@@ -321,8 +337,9 @@ struct AccountForm: View {
             }
         }
         .animation(Brand.spring, value: account.error)
+        .animation(Brand.spring, value: account.waitingForGoogle)
         .onChange(of: create) { _ in account.error = nil }
-        .onAppear { focus = .email }
+        .onAppear { if !account.waitingForGoogle { focus = nil } }
     }
 
     private func submit() {
@@ -336,6 +353,36 @@ struct AccountForm: View {
                 withAnimation(.linear(duration: 0.4)) { shakes += 1 }
             }
         }
+    }
+}
+
+/// "Continue with Google", following Google's button guidelines (white, logo, neutral border).
+struct GoogleButton: View {
+    let waiting: Bool
+    let action: () -> Void
+    @State private var hover = false
+    private static let logo: NSImage? = Bundle.main.url(forResource: "google-g", withExtension: "png").flatMap { NSImage(contentsOf: $0) }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                if let logo = Self.logo {
+                    Image(nsImage: logo).resizable().interpolation(.high).frame(width: 18, height: 18)
+                } else {
+                    Text("G").font(.system(size: 15, weight: .bold)).foregroundColor(.blue)
+                }
+                Text("Continue with Google").font(.system(size: 13.5, weight: .medium)).foregroundColor(Color(red: 0.12, green: 0.12, blue: 0.12))
+            }
+            .frame(maxWidth: .infinity, minHeight: 38)
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.white.opacity(hover ? 0.92 : 1)))
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color(red: 0.45, green: 0.47, blue: 0.46).opacity(0.55), lineWidth: 1))
+            .shadow(color: .black.opacity(0.05), radius: 2, y: 1)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressableStyle())
+        .disabled(waiting)
+        .opacity(waiting ? 0.6 : 1)
+        .onHover { h in withAnimation(Brand.quick) { hover = h } }
     }
 }
 

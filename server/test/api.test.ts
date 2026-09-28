@@ -9,6 +9,13 @@ const mock = Bun.serve({
   port: 0,
   async fetch(req) {
     const url = new URL(req.url);
+    if (url.pathname === "/token") {
+      // Fake Google: the code carries the email we want back.
+      const form = await req.formData();
+      const email = String(form.get("code")).replace("google:", "");
+      const payload = Buffer.from(JSON.stringify({ aud: "test-client", sub: "g-" + email, email, email_verified: true })).toString("base64url");
+      return Response.json({ id_token: "x." + payload + ".y" });
+    }
     if (url.pathname.endsWith("/audio/transcriptions")) return Response.json({ text: "um so hello there uh new line thanks" });
     if (url.pathname.endsWith("/chat/completions")) {
       const body: any = await req.json();
@@ -29,7 +36,9 @@ beforeAll(async () => {
   proc = Bun.spawn(["bun", "src/index.ts"], {
     cwd: join(import.meta.dir, ".."),
     env: { ...process.env, PORT: String(port), OPENAI_API_KEY: "test", OPENAI_BASE_URL: `http://127.0.0.1:${mock.port}`,
-      DATABASE_PATH: join(dir, "t.db"), FREE_DAILY_SECONDS: "10" },
+      DATABASE_PATH: join(dir, "t.db"), FREE_DAILY_SECONDS: "10",
+      PUBLIC_URL: base, GOOGLE_CLIENT_ID: "test-client", GOOGLE_CLIENT_SECRET: "secret",
+      GOOGLE_AUTH_URL: `http://127.0.0.1:${mock.port}/auth`, GOOGLE_TOKEN_URL: `http://127.0.0.1:${mock.port}/token` },
     stdout: "ignore", stderr: "inherit",
   });
   for (let i = 0; i < 50; i++) {
@@ -108,4 +117,47 @@ test("the daily free limit is enforced", async () => {
 test("logout revokes the token", async () => {
   expect((await post("/v1/auth/logout", {}, token)).status).toBe(200);
   expect((await fetch(base + "/v1/me", { headers: { Authorization: `Bearer ${token}` } })).status).toBe(401);
+});
+
+
+// --- Google sign-in -------------------------------------------------------
+
+async function googleSignIn(email: string, verifier = "v".repeat(43)) {
+  const state = "state-" + Math.random().toString(36).slice(2, 12);
+  const challenge = new Bun.CryptoHasher("sha256").update(verifier).digest("base64url");
+  const start = await fetch(`${base}/auth/google/start?state=${state}&challenge=${challenge}`, { redirect: "manual" });
+  expect(start.status).toBe(302);
+  const to = new URL(start.headers.get("location")!);
+  expect(to.searchParams.get("redirect_uri")).toBe(`${base}/auth/google/callback`);
+  expect(to.searchParams.get("state")).toBe(state);
+  const cb = await fetch(`${base}/auth/google/callback?code=google:${email}&state=${state}`);
+  const page = await cb.text();
+  const m = page.match(/murmur:\/\/auth\?code=([^&"]+)&amp;state=([^"&]+)/);
+  expect(m?.[2]).toBe(state);
+  return decodeURIComponent(m![1]);
+}
+
+test("google sign-in exchanges a one-time code only with the right verifier", async () => {
+  const code = await googleSignIn("New.Person@gmail.com");
+  expect((await post("/v1/auth/exchange", { code, verifier: "w".repeat(43) })).status).toBe(400);
+  // The code is single-use, even after a failed attempt.
+  expect((await post("/v1/auth/exchange", { code, verifier: "v".repeat(43) })).status).toBe(400);
+  const code2 = await googleSignIn("New.Person@gmail.com");
+  const res = await post("/v1/auth/exchange", { code: code2, verifier: "v".repeat(43) });
+  expect(res.status).toBe(200);
+  const body: any = await res.json();
+  expect(body.email).toBe("new.person@gmail.com");
+  expect(body.token).toStartWith("mur_");
+});
+
+test("google sign-in links to an existing email account", async () => {
+  const signup: any = await (await post("/v1/auth/signup", { email: "both@example.com", password: "a-password" })).json();
+  const code = await googleSignIn("both@example.com");
+  const g: any = await (await post("/v1/auth/exchange", { code, verifier: "v".repeat(43) })).json();
+  const me1: any = await (await fetch(base + "/v1/me", { headers: { Authorization: `Bearer ${signup.token}` } })).json();
+  const me2: any = await (await fetch(base + "/v1/me", { headers: { Authorization: `Bearer ${g.token}` } })).json();
+  expect(me2.email).toBe(me1.email);
+  // Password login still works for the linked account; Google-only accounts can't use one.
+  expect((await post("/v1/auth/login", { email: "both@example.com", password: "a-password" })).status).toBe(200);
+  expect((await post("/v1/auth/login", { email: "new.person@gmail.com", password: "anything1" })).status).toBe(401);
 });

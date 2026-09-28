@@ -29,6 +29,11 @@ db.exec(`
   );
 `);
 
+// Google sign-in (added later; migrate older databases in place).
+const cols = db.query<{ name: string }, []>("PRAGMA table_info(users)").all().map((c) => c.name);
+if (!cols.includes("google_sub")) db.exec("ALTER TABLE users ADD COLUMN google_sub TEXT");
+db.exec("CREATE UNIQUE INDEX IF NOT EXISTS users_google_sub ON users(google_sub)");
+
 export type User = { id: number; email: string; password_hash: string };
 
 export const today = () => new Date().toISOString().slice(0, 10);
@@ -44,6 +49,10 @@ const q = {
   deleteSession: db.query("DELETE FROM sessions WHERE token_hash = ?"),
   usage: db.query<{ seconds: number }, [number, string]>("SELECT seconds FROM usage WHERE user_id = ? AND day = ?"),
   globalUsage: db.query<{ seconds: number | null }, [string]>("SELECT SUM(seconds) AS seconds FROM usage WHERE day = ?"),
+  userByGoogle: db.query<User, [string]>("SELECT id, email, password_hash FROM users WHERE google_sub = ?"),
+  linkGoogle: db.query("UPDATE users SET google_sub = ? WHERE id = ?"),
+  insertGoogleUser: db.query<{ id: number }, [string, string, number, string]>(
+    "INSERT INTO users (email, password_hash, google_sub, created_at, created_ip) VALUES (?, '', ?, ?, ?) RETURNING id"),
   addUsage: db.query(`INSERT INTO usage (user_id, day, seconds, requests) VALUES (?, ?, ?, 1)
     ON CONFLICT(user_id, day) DO UPDATE SET seconds = seconds + excluded.seconds, requests = requests + 1`),
 };
@@ -51,6 +60,15 @@ const q = {
 export const Users = {
   byEmail: (email: string) => q.userByEmail.get(email),
   create: (email: string, hash: string, ip: string) => q.insertUser.get(email, hash, Date.now(), ip)!.id,
+  /** Finds the Google user, links an existing email account, or creates one. */
+  fromGoogle(sub: string, email: string, ip: string): User {
+    const bySub = q.userByGoogle.get(sub);
+    if (bySub) return bySub;
+    const byEmail = q.userByEmail.get(email);
+    if (byEmail) { q.linkGoogle.run(sub, byEmail.id); return byEmail; }
+    const id = q.insertGoogleUser.get(email, sub, Date.now(), ip)!.id;
+    return { id, email, password_hash: "" };
+  },
 };
 
 export const Sessions = {

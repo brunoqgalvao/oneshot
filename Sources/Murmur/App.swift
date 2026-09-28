@@ -155,6 +155,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let path = ([url.host ?? ""] + url.pathComponents.filter { $0 != "/" }).filter { !$0.isEmpty }
         let quiet = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.contains { $0.name == "quiet" } ?? false
         switch path.first {
+        case "auth":
+            Task { @MainActor in
+                await Account.shared.handleAuthCallback(url)
+                NSApp.activate(ignoringOtherApps: true)
+                self.statusMenu?.refresh()
+            }
         case "toggle": controller.toggle()
         case "start": if !controller.isRecording { controller.toggle() }
         case "stop": if controller.isRecording { controller.finish() }

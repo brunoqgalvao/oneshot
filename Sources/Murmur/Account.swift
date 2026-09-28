@@ -1,4 +1,7 @@
 import Foundation
+import AppKit
+import CryptoKit
+import Security
 
 enum CloudError: LocalizedError {
     case server(status: Int, code: String, message: String)
@@ -65,6 +68,14 @@ struct CloudClient {
         return (r.token, r.email, r.usage)
     }
 
+    func exchange(code: String, verifier: String) async throws -> (token: String, email: String, usage: CloudUsage) {
+        var req = request("v1/auth/exchange", method: "POST")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONSerialization.data(withJSONObject: ["code": code, "verifier": verifier])
+        let r: AuthResponse = try await send(req)
+        return (r.token, r.email, r.usage)
+    }
+
     func me() async throws -> (email: String, usage: CloudUsage) {
         let r: MeResponse = try await send(request("v1/me", method: "GET"))
         return (r.email, r.usage)
@@ -123,7 +134,10 @@ final class Account: ObservableObject {
     @Published private(set) var usage: CloudUsage?
     @Published private(set) var busy = false
     @Published var error: String?
+    @Published private(set) var waitingForGoogle = false
     private(set) var token: String?
+    private var googleState: String?
+    private var googleVerifier: String?
 
     var isSignedIn: Bool { token != nil }
 
@@ -151,6 +165,56 @@ final class Account: ObservableObject {
         } catch {
             self.error = Self.describe(error)
         }
+    }
+
+    /// Opens Google sign-in in the browser. The server sends the browser back to
+    /// murmur://auth with a one-time code that only this app (holding the PKCE
+    /// verifier) can exchange for a session.
+    func signInWithGoogle() {
+        let verifier = Self.randomURLSafe(32)
+        let state = Self.randomURLSafe(24)
+        googleVerifier = verifier
+        googleState = state
+        let challenge = Data(SHA256.hash(data: Data(verifier.utf8))).base64URL
+        var c = URLComponents(url: Prefs.shared.serverURL.appendingPathComponent("auth/google/start"), resolvingAgainstBaseURL: false)!
+        c.queryItems = [URLQueryItem(name: "state", value: state), URLQueryItem(name: "challenge", value: challenge)]
+        error = nil
+        waitingForGoogle = true
+        NSWorkspace.shared.open(c.url!)
+    }
+
+    func cancelGoogle() {
+        waitingForGoogle = false
+        googleState = nil
+        googleVerifier = nil
+    }
+
+    func handleAuthCallback(_ url: URL) async {
+        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        func value(_ n: String) -> String? { items.first { $0.name == n }?.value }
+        guard let state = value("state"), state == googleState, let verifier = googleVerifier else { return }
+        googleState = nil
+        googleVerifier = nil
+        defer { waitingForGoogle = false }
+        guard value("error") == nil, let code = value("code") else {
+            error = "Google sign-in was cancelled."
+            return
+        }
+        busy = true
+        defer { busy = false }
+        do {
+            let r = try await CloudClient(base: Prefs.shared.serverURL, token: nil).exchange(code: code, verifier: verifier)
+            save(token: r.token, email: r.email)
+            usage = r.usage
+        } catch {
+            self.error = Self.describe(error)
+        }
+    }
+
+    private static func randomURLSafe(_ bytes: Int) -> String {
+        var b = [UInt8](repeating: 0, count: bytes)
+        _ = SecRandomCopyBytes(kSecRandomDefault, bytes, &b)
+        return Data(b).base64URL
     }
 
     func signOut() async {
@@ -198,5 +262,12 @@ final class Account: ObservableObject {
             }
         }
         return error.localizedDescription
+    }
+}
+
+
+extension Data {
+    var base64URL: String {
+        base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
     }
 }

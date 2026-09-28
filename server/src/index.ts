@@ -2,6 +2,7 @@ import { config } from "./config";
 import { Sessions, Usage, Users, today, type User } from "./db";
 import { allow } from "./limits";
 import { chat, transcribe, UpstreamError } from "./openai";
+import * as google from "./google";
 import { commandSystem, commandUser, dictationSystem, dictationUser, looksLikeDrift, strip } from "./prompts";
 
 if (!config.openaiKey) {
@@ -63,6 +64,7 @@ async function login(req: Request, ip: string) {
     return fail(429, "rate_limited", "Too many attempts. Wait a few minutes and try again.");
   }
   const user = Users.byEmail(email);
+  if (user && !user.password_hash) return fail(401, "use_google", "This account signs in with Google.");
   const ok = user ? await Bun.password.verify(password, user.password_hash) : (await Bun.password.hash(password), false);
   if (!user || !ok) return fail(401, "invalid_credentials", "Wrong email or password.");
   return json({ token: startSession(user), email: user.email, usage: usageOf(user) });
@@ -140,6 +142,41 @@ h1{font-size:34px;margin:0 0 4px}p{color:#5b5870}code{background:#f1effa;padding
 <body><h1>Murmur</h1><p>Talk instead of type, in any Mac app. Hold <code>fn</code>, speak, release.</p>
 <p>This is the Murmur server. Sign in from the Murmur app to get a free account.</p></body></html>`;
 
+const html = (body: string, status = 200) => new Response(body, { status, headers: { "Content-Type": "text/html; charset=utf-8" } });
+
+function googleStart(url: URL, ip: string) {
+  if (!google.googleEnabled()) return html(google.page("Google sign-in is off", "Use email and password in Murmur for now."), 503);
+  if (!allow(`google:${ip}`, 30, 600_000)) return html(google.page("Slow down", "Too many sign-in attempts. Try again in a few minutes."), 429);
+  const target = google.startURL(url.searchParams.get("state") ?? "", url.searchParams.get("challenge") ?? "");
+  if (!target) return html(google.page("Something's off", "Start signing in again from the Murmur app."), 400);
+  return Response.redirect(target, 302);
+}
+
+async function googleCallback(url: URL, ip: string) {
+  const state = url.searchParams.get("state") ?? "";
+  if (url.searchParams.get("error")) {
+    return html(google.page("Sign-in cancelled", "You can close this tab and try again from Murmur.",
+      `murmur://auth?error=cancelled&state=${encodeURIComponent(state)}`));
+  }
+  try {
+    const who = await google.finish(url.searchParams.get("code") ?? "", state);
+    const user = Users.fromGoogle(who.sub, who.email, ip);
+    const code = google.grant(user.id, user.email, who.challenge);
+    const back = `murmur://auth?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`;
+    return html(google.page("You're signed in", `Welcome, ${user.email}. Heading back to Murmur…`, back));
+  } catch (e) {
+    return html(google.page("Couldn't sign in", (e as Error).message), 400);
+  }
+}
+
+async function exchange(req: Request) {
+  const body = (await req.json().catch(() => ({}))) as { code?: string; verifier?: string };
+  const g = google.redeem(String(body.code ?? ""), String(body.verifier ?? ""));
+  if (!g) return fail(400, "invalid_grant", "That sign-in expired. Try again.");
+  const user = { id: g.userId, email: g.email, password_hash: "" };
+  return json({ token: startSession(user), email: g.email, usage: usageOf(user) });
+}
+
 const server = Bun.serve({
   port: config.port,
   maxRequestBodySize: config.maxAudioBytes + 64 * 1024,
@@ -153,6 +190,10 @@ const server = Bun.serve({
         case "GET /health": return json({ ok: true });
         case "POST /v1/auth/signup": return await signup(req, ip);
         case "POST /v1/auth/login": return await login(req, ip);
+        case "GET /auth/google/start": return googleStart(url, ip);
+        case "GET /auth/google/callback": return await googleCallback(url, ip);
+        case "POST /v1/auth/exchange": return await exchange(req);
+        case "GET /v1/auth/providers": return json({ google: google.googleEnabled() });
       }
       const auth = authed(req);
       if (!auth) return fail(401, "unauthorized", "Please sign in again.");

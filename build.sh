@@ -18,6 +18,7 @@ SERVER_URL="${MURMUR_SERVER_URL:-$(cat .server-url 2>/dev/null || echo http://lo
 plutil -replace MurmurServerURL -string "$SERVER_URL" "$APP/Contents/Info.plist"
 echo "Server: $SERVER_URL"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+cp Resources/google-g.png "$APP/Contents/Resources/google-g.png"
 
 [ -f .signing/murmur.keychain-db ] || ./scripts/make_signing_identity.sh || true
 KC="$PWD/.signing/murmur.keychain-db"
