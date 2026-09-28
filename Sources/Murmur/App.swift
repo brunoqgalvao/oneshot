@@ -53,6 +53,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .filter { $0 != NSRunningApplication.current }
         if !others.isEmpty { NSApp.terminate(nil); return }
 
+        NSApp.mainMenu = Self.buildMainMenu()
         statusMenu = StatusMenu(controller: controller)
         controller.onStateChange = { [weak self] in self?.statusMenu?.refresh() }
         controller.openSettings = { [weak self] tab in
@@ -79,6 +80,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func showMain(_ page: MainNav.Page? = nil, activate: Bool = true) {
         main.show(page, activate: activate)
     }
+
+    /// Standard app + Edit menus. Without an Edit menu, ⌘C/⌘V/⌘A do nothing in
+    /// Murmur's own text fields, including when Murmur pastes a dictation into them.
+    static func buildMainMenu() -> NSMenu {
+        let main = NSMenu()
+        let appItem = NSMenuItem()
+        let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "About Murmur", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "Settings…", action: #selector(AppDelegate.openSettingsFromMenu), keyEquivalent: ",")
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "Hide Murmur", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        appMenu.addItem(withTitle: "Quit Murmur", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appItem.submenu = appMenu
+        main.addItem(appItem)
+
+        let editItem = NSMenuItem()
+        let edit = NSMenu(title: "Edit")
+        edit.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+        let redo = edit.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "z")
+        redo.keyEquivalentModifierMask = [.command, .shift]
+        edit.addItem(.separator())
+        edit.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        edit.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        editItem.submenu = edit
+        main.addItem(editItem)
+
+        let windowItem = NSMenuItem()
+        let window = NSMenu(title: "Window")
+        window.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        window.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        windowItem.submenu = window
+        main.addItem(windowItem)
+        NSApp.windowsMenu = window
+        return main
+    }
+
+    @objc func openSettingsFromMenu() { showSettings(tab: "general") }
 
     func showOnboarding(step: OnboardingModel.Step?, activate: Bool = true) {
         if let step {

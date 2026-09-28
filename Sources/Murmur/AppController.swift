@@ -317,7 +317,8 @@ final class AppController: ObservableObject {
             }
 
             // Debug runs (fake audio) only paste into TextEdit, so a test can never type into real work.
-            let debugUnsafe = s.fakeAudio != nil && NSWorkspace.shared.frontmostApplication?.bundleIdentifier != "com.apple.TextEdit"
+            let frontID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+            let debugUnsafe = s.fakeAudio != nil && frontID != "com.apple.TextEdit" && frontID != Bundle.main.bundleIdentifier
             let pasted = debugUnsafe ? { Paster.copy(text); return false }() : insert(text)
             let latency = Date().timeIntervalSince(releasedAt)
             history.add(Dictation(raw: raw, text: text.trimmingCharacters(in: .whitespaces), app: s.focus.appName,
@@ -427,6 +428,12 @@ final class AppController: ObservableObject {
 
     @discardableResult
     private func insert(_ text: String) -> Bool {
+        // Dictating into Murmur's own window: type straight into the focused field.
+        if NSWorkspace.shared.frontmostApplication?.processIdentifier == ProcessInfo.processInfo.processIdentifier,
+           let field = NSApp.keyWindow?.firstResponder as? NSTextView, field.isEditable {
+            field.insertText(text, replacementRange: field.selectedRange())
+            return true
+        }
         if AXIsProcessTrusted() {
             Paster.paste(text, restoreClipboard: prefs.restoreClipboard)
             return true

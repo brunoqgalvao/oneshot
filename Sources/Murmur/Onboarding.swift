@@ -527,16 +527,16 @@ private struct PracticeStep: View {
                     .strokeBorder(focused ? Brand.violet.opacity(0.6) : Color.primary.opacity(0.1), lineWidth: focused ? 1.5 : 1))
                 .animation(Brand.quick, value: focused)
 
-                if let r = result, r.raw != r.text {
-                    HStack(alignment: .top, spacing: 8) {
-                        Image(systemName: "waveform").foregroundColor(.secondary).font(.system(size: 11)).padding(.top, 2)
-                        Text("You said: “\(r.raw)”").font(.system(size: 11.5)).foregroundColor(.secondary).lineLimit(3)
+            }
+            .onChange(of: result?.id) { _ in
+                // Safety net: if the paste didn't land in the box, show the result anyway.
+                guard let r = result else { return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                    if !text.contains(r.text.trimmingCharacters(in: .whitespaces)) {
+                        text = text.isEmpty ? r.text.trimmingCharacters(in: .whitespaces) : text + " " + r.text.trimmingCharacters(in: .whitespaces)
                     }
-                    .frame(width: 440, alignment: .leading)
-                    .transition(.opacity.combined(with: .offset(y: -4)))
                 }
             }
-            .animation(Brand.spring, value: result?.id)
         } actions: {
             Button(result == nil ? "Skip for now" : "Continue") { model.next() }
                 .buttonStyle(result == nil ? AnyButtonStyle(SecondaryButtonStyle()) : AnyButtonStyle(PrimaryButtonStyle()))
