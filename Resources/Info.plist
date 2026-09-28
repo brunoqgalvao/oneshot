@@ -2,26 +2,44 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleName</key><string>Murmur</string>
-    <key>CFBundleDisplayName</key><string>Murmur</string>
-    <key>CFBundleIdentifier</key><string>com.brunogalvao.murmur</string>
-    <key>CFBundleExecutable</key><string>Murmur</string>
-    <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>0.1.0</string>
-    <key>CFBundleVersion</key><string>1</string>
-    <key>CFBundleIconFile</key><string>AppIcon</string>
-    <key>LSMinimumSystemVersion</key><string>13.0</string>
-    <key>LSUIElement</key><true/>
-    <key>MurmurServerURL</key><string>http://localhost:8787</string>
-    <key>NSHighResolutionCapable</key><true/>
-    <key>NSMicrophoneUsageDescription</key><string>Murmur records your voice while you hold the dictation key, then types the transcript where your cursor is.</string>
-    <key>NSSpeechRecognitionUsageDescription</key><string>Murmur can transcribe on this Mac when the network is slow or offline.</string>
-    <key>CFBundleURLTypes</key>
-    <array>
-        <dict>
-            <key>CFBundleURLName</key><string>com.brunogalvao.murmur</string>
-            <key>CFBundleURLSchemes</key><array><string>murmur</string></array>
-        </dict>
-    </array>
+	<key>CFBundleDisplayName</key>
+	<string>Oneshot</string>
+	<key>CFBundleExecutable</key>
+	<string>Oneshot</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>fm.oneshot.app</string>
+	<key>CFBundleName</key>
+	<string>Oneshot</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.2.0</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>fm.oneshot.app</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>oneshot</string>
+			</array>
+		</dict>
+	</array>
+	<key>CFBundleVersion</key>
+	<string>2</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>13.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Oneshot records your voice while you hold the dictation key, then types the transcript where your cursor is.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Oneshot can transcribe on this Mac when the network is slow or offline.</string>
+	<key>OneshotServerURL</key>
+	<string>http://localhost:8787</string>
 </dict>
 </plist>

@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import ApplicationServices
 
-/// A small always-on pill at the bottom of the screen that says "Murmur is running".
+/// A small always-on pill at the bottom of the screen that says "Oneshot is running".
 /// Hover to see how to use it, click to start hands-free dictation, right-click for
 /// a menu. It hides while the dictation HUD is showing, which takes its place.
 @MainActor
@@ -114,7 +114,7 @@ private struct IdleView: View {
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(model.needsSetup ? .orange : .white.opacity(0.9))
                     .transition(.iconSwap)
-                Text(model.needsSetup ? "Murmur needs setup · click" : "Hold \(model.trigger) to talk · click to start")
+                Text(model.needsSetup ? "Oneshot needs setup · click" : "Hold \(model.trigger) to talk · click to start")
                     .font(.system(size: 11.5, weight: .medium))
                     .foregroundColor(.white.opacity(0.92))
                     .fixedSize()
@@ -140,11 +140,11 @@ private struct IdleView: View {
         .onTapGesture(perform: click)
         .contextMenu {
             Button("Start dictation", action: click)
-            Button("Open Murmur", action: open)
+            Button("Open Oneshot", action: open)
             Button("Settings…", action: settings)
             Divider()
             Button("Hide this indicator", action: hide)
         }
-        .help(model.needsSetup ? "Murmur needs setup" : "Murmur is running")
+        .help(model.needsSetup ? "Oneshot needs setup" : "Oneshot is running")
     }
 }

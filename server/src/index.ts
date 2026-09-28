@@ -3,6 +3,7 @@ import { Sessions, Usage, Users, today, type User } from "./db";
 import { allow } from "./limits";
 import { chat, transcribe, UpstreamError } from "./openai";
 import * as google from "./google";
+import { Feedback, publicView, STATUSES, type Status } from "./feedback";
 import { commandSystem, commandUser, dictationSystem, dictationUser, looksLikeDrift, strip } from "./prompts";
 
 if (!config.openaiKey) {
@@ -99,7 +100,7 @@ async function dictate(req: Request, user: User) {
     return json({ error: "daily_limit", message: `You've used today's free ${Math.round(config.freeDailySeconds / 60)} minutes. It resets at midnight UTC.`, usage: usageOf(user) }, 429);
   }
   if (Usage.globalSeconds() + seconds > config.globalDailySeconds) {
-    return fail(503, "at_capacity", "Murmur's free tier is at capacity for today. Try again tomorrow.");
+    return fail(503, "at_capacity", "Oneshot's free tier is at capacity for today. Try again tomorrow.");
   }
 
   const vocabulary = (meta.vocabulary ?? []).map(String).slice(0, 100);
@@ -136,34 +137,84 @@ async function dictate(req: Request, user: User) {
   });
 }
 
-const landing = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
-<title>Murmur</title><style>body{font:16px/1.5 -apple-system,system-ui,sans-serif;max-width:560px;margin:15vh auto;padding:0 24px;color:#1d1b2e}
-h1{font-size:34px;margin:0 0 4px}p{color:#5b5870}code{background:#f1effa;padding:2px 6px;border-radius:5px}</style></head>
-<body><h1>Murmur</h1><p>Talk instead of type, in any Mac app. Hold <code>fn</code>, speak, release.</p>
-<p>This is the Murmur server. Sign in from the Murmur app to get a free account.</p></body></html>`;
+const PUBLIC = new URL("../public/", import.meta.url).pathname;
+const staticFiles: Record<string, string> = {
+  "/": "index.html", "/install.sh": "install.sh", "/demo.mp4": "demo.mp4", "/icon.png": "icon.png", "/og.png": "og.png",
+};
+const staticTypes: Record<string, string> = {
+  html: "text/html; charset=utf-8", sh: "text/x-shellscript; charset=utf-8", mp4: "video/mp4", png: "image/png",
+};
+function serveStatic(pathname: string) {
+  const name = staticFiles[pathname];
+  if (!name) return null;
+  const file = Bun.file(PUBLIC + name);
+  return new Response(file, {
+    headers: { "Content-Type": staticTypes[name.split(".").pop()!] ?? "application/octet-stream", "Cache-Control": "public, max-age=300" },
+  });
+}
+
+const INSTALL = /^[A-Za-z0-9_-]{22,64}$/;
+
+async function sendFeedback(req: Request, ip: string) {
+  const installId = req.headers.get("x-install-id") ?? "";
+  if (!INSTALL.test(installId)) return fail(400, "no_install", "Missing install id.");
+  if (!allow(`feedback:${installId}`, 10, 3_600_000) || !allow(`feedback-ip:${ip}`, 30, 3_600_000)) {
+    return fail(429, "rate_limited", "Thanks! That's a lot of feedback for one hour. Try again a bit later.");
+  }
+  const body = (await req.json().catch(() => ({}))) as { text?: string; context?: Record<string, unknown> };
+  const text = String(body.text ?? "").trim();
+  if (text.length < 2) return fail(400, "empty", "Write something first.");
+  if (text.length > 5000) return fail(400, "too_long", "Keep it under 5,000 characters.");
+  const user = authed(req)?.user ?? null;
+  const context = body.context ? JSON.stringify(body.context).slice(0, 2000) : null;
+  const id = Feedback.create(installId, user?.id ?? null, user?.email ?? null, text, context);
+  console.log(`feedback #${id} received`);
+  return json({ id }, 201);
+}
+
+function myFeedback(req: Request) {
+  const installId = req.headers.get("x-install-id") ?? "";
+  if (!INSTALL.test(installId)) return fail(400, "no_install", "Missing install id.");
+  return json({ items: Feedback.mine(installId).map(publicView) });
+}
+
+function isAdmin(req: Request) {
+  const h = req.headers.get("authorization") ?? "";
+  return config.adminToken.length >= 32 && h === `Bearer ${config.adminToken}`;
+}
+
+async function adminFeedback(req: Request, url: URL) {
+  if (!isAdmin(req)) return fail(401, "unauthorized", "Admin only.");
+  if (req.method === "GET") return json({ items: Feedback.list(url.searchParams.get("status") ?? "new") });
+  const id = Number(url.pathname.split("/").pop());
+  const body = (await req.json().catch(() => ({}))) as { status?: string; reply?: string };
+  if (!STATUSES.includes(body.status as Status)) return fail(400, "bad_status", `status must be one of ${STATUSES.join(", ")}`);
+  const updated = Feedback.update(id, body.status as Status, body.reply?.trim() ? body.reply.trim().slice(0, 4000) : null);
+  return updated ? json(updated) : fail(404, "not_found", "No such feedback.");
+}
 
 const html = (body: string, status = 200) => new Response(body, { status, headers: { "Content-Type": "text/html; charset=utf-8" } });
 
 function googleStart(url: URL, ip: string) {
-  if (!google.googleEnabled()) return html(google.page("Google sign-in is off", "Use email and password in Murmur for now."), 503);
+  if (!google.googleEnabled()) return html(google.page("Google sign-in is off", "Use email and password in Oneshot for now."), 503);
   if (!allow(`google:${ip}`, 30, 600_000)) return html(google.page("Slow down", "Too many sign-in attempts. Try again in a few minutes."), 429);
   const target = google.startURL(url.searchParams.get("state") ?? "", url.searchParams.get("challenge") ?? "");
-  if (!target) return html(google.page("Something's off", "Start signing in again from the Murmur app."), 400);
+  if (!target) return html(google.page("Something's off", "Start signing in again from the Oneshot app."), 400);
   return Response.redirect(target, 302);
 }
 
 async function googleCallback(url: URL, ip: string) {
   const state = url.searchParams.get("state") ?? "";
   if (url.searchParams.get("error")) {
-    return html(google.page("Sign-in cancelled", "You can close this tab and try again from Murmur.",
-      `murmur://auth?error=cancelled&state=${encodeURIComponent(state)}`));
+    return html(google.page("Sign-in cancelled", "You can close this tab and try again from Oneshot.",
+      `oneshot://auth?error=cancelled&state=${encodeURIComponent(state)}`));
   }
   try {
     const who = await google.finish(url.searchParams.get("code") ?? "", state);
     const user = Users.fromGoogle(who.sub, who.email, ip);
     const code = google.grant(user.id, user.email, who.challenge);
-    const back = `murmur://auth?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`;
-    return html(google.page("You're signed in", `Welcome, ${user.email}. Heading back to Murmur…`, back));
+    const back = `oneshot://auth?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`;
+    return html(google.page("You're signed in", `Welcome, ${user.email}. Heading back to Oneshot…`, back));
   } catch (e) {
     return html(google.page("Couldn't sign in", (e as Error).message), 400);
   }
@@ -185,8 +236,11 @@ const server = Bun.serve({
     const ip = clientIP(req, server);
     const route = `${req.method} ${url.pathname}`;
     try {
+      if (req.method === "GET") {
+        const file = serveStatic(url.pathname);
+        if (file) return file;
+      }
       switch (route) {
-        case "GET /": return new Response(landing, { headers: { "Content-Type": "text/html; charset=utf-8" } });
         case "GET /health": return json({ ok: true });
         case "POST /v1/auth/signup": return await signup(req, ip);
         case "POST /v1/auth/login": return await login(req, ip);
@@ -194,7 +248,15 @@ const server = Bun.serve({
         case "GET /auth/google/callback": return await googleCallback(url, ip);
         case "POST /v1/auth/exchange": return await exchange(req);
         case "GET /v1/auth/providers": return json({ google: google.googleEnabled() });
+        case "POST /v1/feedback": return await sendFeedback(req, ip);
+        case "GET /v1/feedback": return myFeedback(req);
+        case "POST /v1/feedback/seen": {
+          const installId = req.headers.get("x-install-id") ?? "";
+          if (INSTALL.test(installId)) Feedback.markSeen(installId);
+          return json({ ok: true });
+        }
       }
+      if (url.pathname === "/admin/feedback" || url.pathname.startsWith("/admin/feedback/")) return await adminFeedback(req, url);
       const auth = authed(req);
       if (!auth) return fail(401, "unauthorized", "Please sign in again.");
       switch (route) {
@@ -214,4 +276,4 @@ const server = Bun.serve({
   },
 });
 
-console.log(`Murmur server listening on :${server.port}`);
+console.log(`Oneshot server listening on :${server.port}`);

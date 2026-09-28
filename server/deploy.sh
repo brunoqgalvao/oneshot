@@ -1,5 +1,5 @@
 #!/bin/bash
-# Deploys the Murmur server to Fly.io and points the Mac app at it.
+# Deploys the Oneshot server to Fly.io and points the Mac app at it.
 # Needs: fly CLI logged in, OPENAI_API_KEY in the environment.
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -16,4 +16,4 @@ URL="https://$APP.fly.dev"
 curl -fsS "$URL/health" && echo
 echo "$URL" > ../.server-url
 cd .. && ./build.sh --open
-echo "Murmur now uses $URL"
+echo "Oneshot now uses $URL"

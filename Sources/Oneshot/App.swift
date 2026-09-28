@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import ApplicationServices
+import UserNotifications
 
 @main
 @MainActor
@@ -34,7 +35,7 @@ enum Main {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     static weak var shared: AppDelegate?
     private let controller = AppController.shared
     private var statusMenu: StatusMenu?
@@ -73,6 +74,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.hud.onVisibilityChange = { [weak self] visible in self?.indicator.setSuppressed(visible) }
         indicator.install()
 
+        UNUserNotificationCenter.current().delegate = self
+        FeedbackStore.shared.start()
+        Updater.shared.start()
+
         let prefs = Prefs.shared
         let needsSetup = !AXIsProcessTrusted() || AudioRecorder.permission != .authorized
             || (prefs.engine == .openAI && prefs.effectiveAPIKey == nil)
@@ -80,7 +85,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !prefs.onboarded || needsSetup { showOnboarding(step: prefs.onboarded ? nil : .welcome) }
     }
 
-    /// Opening Murmur again (Spotlight, Finder, Launchpad) shows Settings. This is
+    /// Opening Oneshot again (Spotlight, Finder, Launchpad) shows Settings. This is
     /// the way back in when a crowded menu bar hides the status icon behind the notch.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag { showMain() }
@@ -92,17 +97,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Standard app + Edit menus. Without an Edit menu, ⌘C/⌘V/⌘A do nothing in
-    /// Murmur's own text fields, including when Murmur pastes a dictation into them.
+    /// Oneshot's own text fields, including when Oneshot pastes a dictation into them.
     static func buildMainMenu() -> NSMenu {
         let main = NSMenu()
         let appItem = NSMenuItem()
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "About Murmur", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(withTitle: "About Oneshot", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Settings…", action: #selector(AppDelegate.openSettingsFromMenu), keyEquivalent: ",")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Hide Murmur", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
-        appMenu.addItem(withTitle: "Quit Murmur", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(withTitle: "Hide Oneshot", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        appMenu.addItem(withTitle: "Quit Oneshot", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
         main.addItem(appItem)
 
@@ -131,6 +136,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func openSettingsFromMenu() { showSettings(tab: "general") }
 
+    // Clicking a "your feedback shipped" notification opens the Feedback page.
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
+                                            withCompletionHandler done: @escaping () -> Void) {
+        Task { @MainActor in self.showMain(.feedback); done() }
+    }
+
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
+                                            withCompletionHandler done: @escaping (UNNotificationPresentationOptions) -> Void) {
+        done([.banner, .sound])
+    }
+
     func showOnboarding(step: OnboardingModel.Step?, activate: Bool = true) {
         if let step {
             onboarding.show(step: step, activate: activate)
@@ -147,7 +163,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func finishOnboarding() {
         onboarding.close()
         showMain(.home)
-        controller.hud.show(.notice("Murmur is in your menu bar. Hold \(Prefs.shared.trigger.short) anywhere."), autoHideAfter: 3.5)
+        controller.hud.show(.notice("Oneshot is in your menu bar. Hold \(Prefs.shared.trigger.short) anywhere."), autoHideAfter: 3.5)
     }
 
     func showSettings(tab: String?, activate: Bool = true) {
@@ -180,6 +196,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "setup", "onboarding":
             let step = path.count > 1 ? OnboardingModel.Step.allCases.first { "\($0)" == path[1] } : nil
             showOnboarding(step: step ?? .welcome, activate: !quiet)
+        case "feedback": showMain(.feedback, activate: !quiet)
         case "home", "main":
             showMain(path.count > 1 ? MainNav.Page(rawValue: path[1]) : .home, activate: !quiet)
         case "close-settings": settings.close(); onboarding.close(); main.close()
@@ -193,7 +210,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-/// Renders HUD states on demand (murmur://demo/<state>) for screenshots.
+/// Renders HUD states on demand (oneshot://demo/<state>) for screenshots.
 @MainActor
 enum Demo {
     private static var timer: Timer?
@@ -214,7 +231,7 @@ enum Demo {
         switch state {
         case "processing", "command-processing": hud.show(.processing, autoHideAfter: 6)
         case "done": hud.show(.done("23 words · 1.2s"), autoHideAfter: 6)
-        case "error": hud.show(.error("Can't reach the Murmur server"), autoHideAfter: 6)
+        case "error": hud.show(.error("Can't reach the Oneshot server"), autoHideAfter: 6)
         case "notice": hud.show(.notice("Didn't catch that"), autoHideAfter: 6)
         case "hide": hud.hide()
         default:
@@ -226,8 +243,8 @@ enum Demo {
 }
 
 /// Command-line helpers for testing without the microphone:
-///   Murmur --signup|--login <email> <password>
-///   Murmur --transcribe <audio file> [--app <bundle id>]
+///   Oneshot --signup|--login <email> <password>
+///   Oneshot --transcribe <audio file> [--app <bundle id>]
 @MainActor
 enum CLI {
     static func auth(create: Bool, email: String, password: String) -> Never {
@@ -258,13 +275,13 @@ enum CLI {
                                            vocabulary: prefs.vocabularyTerms, destination: dest.rawValue, appName: bundleID,
                                            contextBefore: nil, selection: nil, cleanup: true)
                     let r = try await Account.shared.client.dictate(fileURL: file, meta: meta)
-                    print("engine:    Murmur server \(prefs.serverURL.absoluteString)")
+                    print("engine:    Oneshot server \(prefs.serverURL.absoluteString)")
                     print("raw:       \(r.raw)")
                     print("cleaned:   \(r.text)")
                     print("timing:    \(String(format: "%.2f", Date().timeIntervalSince(t0)))s round trip · \(r.usage.map { "\($0.remainingMinutes) of \($0.limitMinutes) free min left" } ?? "")")
                     exit(0)
                 }
-                guard let key = prefs.effectiveAPIKey else { throw MurmurError.noAPIKey }
+                guard let key = prefs.effectiveAPIKey else { throw OneshotError.noAPIKey }
                 let client = OpenAIClient(apiKey: key)
                 let raw = try await client.transcribe(fileURL: file, model: prefs.transcribeModel, prompt: nil, language: prefs.language)
                 let t1 = Date()

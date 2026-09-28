@@ -181,7 +181,7 @@ final class AppController: ObservableObject {
         guard session == nil else { return }
         switch prefs.engine {
         case .cloud where !Account.shared.isSignedIn:
-            flash(.error("Sign in to Murmur (it's free) to start dictating"), sound: true)
+            flash(.error("Sign in to Oneshot (it's free) to start dictating"), sound: true)
             openSettings?("setup")
             return
         case .openAI where prefs.effectiveAPIKey == nil && !appleFallbackOK:
@@ -343,11 +343,11 @@ final class AppController: ObservableObject {
             }
         } catch {
             if let audioURL { try? FileManager.default.removeItem(at: audioURL) }
-            NSLog("Murmur failed: \(error)")
+            NSLog("Oneshot failed: \(error)")
             if let e = error as? CloudError {
                 if e.status == 401 {
                     Account.shared.sessionExpired()
-                    flash(.error("Please sign in to Murmur again"), sound: true, seconds: 3)
+                    flash(.error("Please sign in to Oneshot again"), sound: true, seconds: 3)
                     openSettings?("setup")
                     return
                 }
@@ -364,7 +364,7 @@ final class AppController: ObservableObject {
 
     private var appleFallbackOK: Bool { prefs.offlineFallback && AppleTranscriber.status == .authorized }
 
-    /// One request to the Murmur server: it transcribes and cleans up.
+    /// One request to the Oneshot server: it transcribes and cleans up.
     private func viaCloud(url: URL, rec: Recording, s: Session, selection: String?) async throws -> Outcome {
         let meta = DictateMeta(
             mode: s.command ? "command" : "dictate",
@@ -380,9 +380,9 @@ final class AppController: ObservableObject {
             let r = try await Account.shared.client.dictate(fileURL: url, meta: meta)
             Account.shared.update(usage: r.usage)
             onStateChange?()
-            return Outcome(raw: r.raw, text: r.text, mode: r.mode, engine: "murmur")
+            return Outcome(raw: r.raw, text: r.text, mode: r.mode, engine: "oneshot")
         } catch let e as URLError where appleFallbackOK && !s.command {
-            NSLog("Murmur: server unreachable (\(e.code.rawValue)), transcribing on-device")
+            NSLog("Oneshot: server unreachable (\(e.code.rawValue)), transcribing on-device")
             let raw = try await apple.transcribe(url: url, language: prefs.language, vocabulary: prefs.vocabularyTerms)
             return Outcome(raw: raw, text: raw, mode: "dictate", engine: "apple (offline fallback)")
         }
@@ -409,7 +409,7 @@ final class AppController: ObservableObject {
                     vocabulary: prefs.vocabularyTerms, model: prefs.cleanupModel)
                 if !cleaned.isEmpty, !Cleaner.looksLikeDrift(raw: raw, cleaned: cleaned) { text = cleaned }
             } catch {
-                NSLog("Murmur cleanup failed, using raw transcript: \(error)")
+                NSLog("Oneshot cleanup failed, using raw transcript: \(error)")
             }
         }
         return Outcome(raw: raw, text: text, mode: "dictate", engine: engineName)
@@ -422,7 +422,7 @@ final class AppController: ObservableObject {
         }
         guard let key = prefs.effectiveAPIKey else {
             if appleFallbackOK { return (try await apple.transcribe(url: url, language: prefs.language, vocabulary: vocab), "apple") }
-            throw MurmurError.noAPIKey
+            throw OneshotError.noAPIKey
         }
         do {
             let prompt = vocab.isEmpty ? nil : "Vocabulary: " + vocab.joined(separator: ", ")
@@ -430,14 +430,14 @@ final class AppController: ObservableObject {
                 fileURL: url, model: prefs.transcribeModel, prompt: prompt, language: prefs.language)
             return (text, prefs.transcribeModel)
         } catch let e as URLError where appleFallbackOK {
-            NSLog("Murmur: network error \(e.code.rawValue), falling back to on-device")
+            NSLog("Oneshot: network error \(e.code.rawValue), falling back to on-device")
             return (try await apple.transcribe(url: url, language: prefs.language, vocabulary: vocab), "apple (offline fallback)")
         }
     }
 
     @discardableResult
     private func insert(_ text: String) -> Bool {
-        // Dictating into Murmur's own window: type straight into the focused field.
+        // Dictating into Oneshot's own window: type straight into the focused field.
         if NSWorkspace.shared.frontmostApplication?.processIdentifier == ProcessInfo.processInfo.processIdentifier,
            let field = NSApp.keyWindow?.firstResponder as? NSTextView, field.isEditable {
             field.insertText(text, replacementRange: field.selectedRange())
@@ -481,13 +481,13 @@ final class AppController: ObservableObject {
         if let e = error as? URLError {
             switch e.code {
             case .notConnectedToInternet: return "You're offline"
-            case .cannotFindHost, .cannotConnectToHost: return "Can't reach the Murmur server"
+            case .cannotFindHost, .cannotConnectToHost: return "Can't reach the Oneshot server"
             case .timedOut: return "The request timed out"
             default: return "Network error"
             }
         }
         if let e = error as? CloudError { return e.localizedDescription }
-        if let e = error as? MurmurError, case .http(let code, let msg) = e {
+        if let e = error as? OneshotError, case .http(let code, let msg) = e {
             if code == 401 { return "OpenAI rejected the API key" }
             if code == 429 { return "OpenAI rate limit or quota reached" }
             return "OpenAI \(code): " + String(msg.prefix(80))

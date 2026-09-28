@@ -22,9 +22,9 @@ final class AppleTranscriber {
     }
 
     func transcribe(url: URL, language: String, vocabulary: [String]) async throws -> String {
-        guard Self.status == .authorized else { throw MurmurError.speechUnavailable("Allow Speech Recognition for offline mode") }
+        guard Self.status == .authorized else { throw OneshotError.speechUnavailable("Allow Speech Recognition for offline mode") }
         guard let rec = SFSpeechRecognizer(locale: Self.locale(for: language)), rec.isAvailable else {
-            throw MurmurError.speechUnavailable("On-device speech isn't available for this language")
+            throw OneshotError.speechUnavailable("On-device speech isn't available for this language")
         }
         let req = SFSpeechURLRecognitionRequest(url: url)
         req.shouldReportPartialResults = false

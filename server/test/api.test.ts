@@ -37,7 +37,7 @@ beforeAll(async () => {
     cwd: join(import.meta.dir, ".."),
     env: { ...process.env, PORT: String(port), OPENAI_API_KEY: "test", OPENAI_BASE_URL: `http://127.0.0.1:${mock.port}`,
       DATABASE_PATH: join(dir, "t.db"), FREE_DAILY_SECONDS: "10",
-      PUBLIC_URL: base, GOOGLE_CLIENT_ID: "test-client", GOOGLE_CLIENT_SECRET: "secret",
+      PUBLIC_URL: base, ADMIN_TOKEN: "a".repeat(40), GOOGLE_CLIENT_ID: "test-client", GOOGLE_CLIENT_SECRET: "secret",
       GOOGLE_AUTH_URL: `http://127.0.0.1:${mock.port}/auth`, GOOGLE_TOKEN_URL: `http://127.0.0.1:${mock.port}/token` },
     stdout: "ignore", stderr: "inherit",
   });
@@ -132,7 +132,7 @@ async function googleSignIn(email: string, verifier = "v".repeat(43)) {
   expect(to.searchParams.get("state")).toBe(state);
   const cb = await fetch(`${base}/auth/google/callback?code=google:${email}&state=${state}`);
   const page = await cb.text();
-  const m = page.match(/murmur:\/\/auth\?code=([^&"]+)&amp;state=([^"&]+)/);
+  const m = page.match(/oneshot:\/\/auth\?code=([^&"]+)&amp;state=([^"&]+)/);
   expect(m?.[2]).toBe(state);
   return decodeURIComponent(m![1]);
 }
@@ -160,4 +160,37 @@ test("google sign-in links to an existing email account", async () => {
   // Password login still works for the linked account; Google-only accounts can't use one.
   expect((await post("/v1/auth/login", { email: "both@example.com", password: "a-password" })).status).toBe(200);
   expect((await post("/v1/auth/login", { email: "new.person@gmail.com", password: "anything1" })).status).toBe(401);
+});
+
+
+// --- Feedback loop ---------------------------------------------------------
+
+test("feedback: anyone can send, only admins list, replies reach the sender", async () => {
+  const install = "install-" + "x".repeat(24);
+  const other = "install-" + "y".repeat(24);
+  const send = (text: string, id = install) =>
+    fetch(base + "/v1/feedback", { method: "POST", headers: { "Content-Type": "application/json", "X-Install-Id": id }, body: JSON.stringify({ text, context: { appVersion: "0.2.0" } }) });
+  expect((await send("")).status).toBe(400);
+  const r = await send("Please add a shortcut to paste the last dictation");
+  expect(r.status).toBe(201);
+  const { id } = (await r.json()) as any;
+  await send("other person's idea", other);
+
+  const admin = { Authorization: "Bearer " + "a".repeat(40), "Content-Type": "application/json" };
+  expect((await fetch(base + "/admin/feedback")).status).toBe(401);
+  expect((await fetch(base + "/admin/feedback", { headers: { Authorization: "Bearer wrong" } })).status).toBe(401);
+  const list: any = await (await fetch(base + "/admin/feedback?status=new", { headers: admin })).json();
+  expect(list.items.map((f: any) => f.text)).toContain("Please add a shortcut to paste the last dictation");
+
+  expect((await fetch(base + "/admin/feedback/" + id, { method: "POST", headers: admin, body: JSON.stringify({ status: "nope" }) })).status).toBe(400);
+  const upd = await fetch(base + "/admin/feedback/" + id, { method: "POST", headers: admin, body: JSON.stringify({ status: "shipped", reply: "Done! It's in 0.2.1." }) });
+  expect(upd.status).toBe(200);
+
+  const mine: any = await (await fetch(base + "/v1/feedback", { headers: { "X-Install-Id": install } })).json();
+  expect(mine.items).toHaveLength(1);
+  expect(mine.items[0]).toMatchObject({ status: "shipped", reply: "Done! It's in 0.2.1.", seen: false });
+  expect(mine.items[0].install_id).toBeUndefined();
+  await fetch(base + "/v1/feedback/seen", { method: "POST", headers: { "X-Install-Id": install } });
+  const after: any = await (await fetch(base + "/v1/feedback", { headers: { "X-Install-Id": install } })).json();
+  expect(after.items[0].seen).toBe(true);
 });

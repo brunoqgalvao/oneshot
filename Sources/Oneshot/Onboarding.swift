@@ -63,7 +63,7 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
             w.titleVisibility = .hidden
             w.isMovableByWindowBackground = true
             w.isReleasedWhenClosed = false
-            w.title = "Welcome to Murmur"
+            w.title = "Welcome to Oneshot"
             w.setContentSize(NSSize(width: 580, height: 660))
             w.center()
             w.delegate = self
@@ -131,7 +131,7 @@ struct OnboardingView: View {
             HStack(spacing: 6) {
                 ForEach(OnboardingModel.Step.allCases, id: \.self) { s in
                     Capsule()
-                        .fill(s == model.step ? Brand.violet : Color.primary.opacity(0.15))
+                        .fill(s == model.step ? Brand.accent : Color.primary.opacity(0.15))
                         .frame(width: s == model.step ? 18 : 6, height: 6)
                 }
             }
@@ -187,9 +187,9 @@ private struct WelcomeStep: View {
     @ObservedObject var model: OnboardingModel
     var body: some View {
         StepScaffold(title: "Talk instead of type",
-                     subtitle: "Hold fn in any app, speak naturally, and Murmur types clean, punctuated text right where your cursor is.") {
+                     subtitle: "Hold fn in any app, speak naturally, and Oneshot types clean, punctuated text right where your cursor is.") {
             Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 96, height: 96)
-                .shadow(color: Brand.violet.opacity(0.3), radius: 16, y: 6)
+                .shadow(color: Brand.accent.opacity(0.3), radius: 16, y: 6)
         } content: {
             DemoStage()
         } actions: {
@@ -211,7 +211,7 @@ private struct DemoStage: View {
         VStack(spacing: 14) {
             HStack(spacing: 0) {
                 Text(typed).font(.system(size: 13)).foregroundColor(.white.opacity(0.9))
-                Rectangle().fill(Brand.violet).frame(width: 1.5, height: 15).opacity(0.9)
+                Rectangle().fill(Brand.accent).frame(width: 1.5, height: 15).opacity(0.9)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 14).frame(height: 36)
@@ -273,8 +273,8 @@ private struct AccountStep: View {
     var body: some View {
         StepScaffold(title: prefs.engine == .openAI ? "Add your OpenAI key" : "Create your free account",
                      subtitle: prefs.engine == .openAI
-                        ? "Murmur calls OpenAI directly with your key. Usage is billed to your OpenAI account."
-                        : "Murmur's server does the transcription, so there's no API key to set up. 30 free minutes every day.") {
+                        ? "Oneshot calls OpenAI directly with your key. Usage is billed to your OpenAI account."
+                        : "Oneshot's server does the transcription, so there's no API key to set up. 30 free minutes every day.") {
             SymbolTile(symbol: prefs.engine == .openAI ? "key.fill" : "person.crop.circle.fill")
         } content: {
             Group {
@@ -291,7 +291,7 @@ private struct AccountStep: View {
             }
             .frame(width: 340)
         } actions: {
-            Button(prefs.engine == .openAI ? "Use a free Murmur account instead" : "I have my own OpenAI key") {
+            Button(prefs.engine == .openAI ? "Use a free Oneshot account instead" : "I have my own OpenAI key") {
                 withAnimation(Brand.spring) { prefs.engine = prefs.engine == .openAI ? .cloud : .openAI }
             }
             .buttonStyle(.link)
@@ -311,7 +311,7 @@ private struct MicrophoneStep: View {
 
     var body: some View {
         StepScaffold(title: "Allow the microphone",
-                     subtitle: "Murmur only listens while you hold the dictation key. The orange dot in the menu bar tells you when it's on.") {
+                     subtitle: "Oneshot only listens while you hold the dictation key. The orange dot in the menu bar tells you when it's on.") {
             SymbolTile(symbol: "mic.fill")
         } content: {
             PermissionState(granted: status == .authorized, grantedText: "Microphone allowed")
@@ -345,8 +345,8 @@ private struct AccessibilityStep: View {
     private var ready: Bool { trusted && controller.hotkeyActive }
 
     var body: some View {
-        StepScaffold(title: "Let Murmur type for you",
-                     subtitle: "Accessibility access lets Murmur notice when you hold the key and paste text into the app you're using. It never records your screen.") {
+        StepScaffold(title: "Let Oneshot type for you",
+                     subtitle: "Accessibility access lets Oneshot notice when you hold the key and paste text into the app you're using. It never records your screen.") {
             SymbolTile(symbol: "keyboard.fill")
         } content: {
             if ready {
@@ -359,7 +359,7 @@ private struct AccessibilityStep: View {
                 Button("Continue") { model.next() }.buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.defaultAction)
             } else if trusted && waited > 6 {
                 VStack(spacing: 8) {
-                    Button("Restart Murmur") { Relaunch.now() }.buttonStyle(PrimaryButtonStyle())
+                    Button("Restart Oneshot") { Relaunch.now() }.buttonStyle(PrimaryButtonStyle())
                     Text("macOS sometimes needs a restart to apply the permission.").font(.system(size: 11)).foregroundColor(.secondary)
                 }
             } else {
@@ -386,7 +386,7 @@ private struct SettingsToggleMock: View {
     var body: some View {
         HStack(spacing: 10) {
             Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 26, height: 26)
-            Text("Murmur").font(.system(size: 13, weight: .medium))
+            Text("Oneshot").font(.system(size: 13, weight: .medium))
             Spacer()
             ZStack(alignment: on ? .trailing : .leading) {
                 Capsule().fill(on ? Color.accentColor : Color.primary.opacity(0.18)).frame(width: 38, height: 22)
@@ -478,7 +478,7 @@ private struct KeyOption: View {
                     Spacer()
                     Image(systemName: selected ? "checkmark.circle.fill" : "circle")
                         .font(.system(size: 17))
-                        .foregroundColor(selected ? Brand.violet : .secondary.opacity(0.5))
+                        .foregroundColor(selected ? Brand.accent : .secondary.opacity(0.5))
                 }
                 Text(title).font(.system(size: 13, weight: .semibold))
                 HStack(alignment: .top, spacing: 5) {
@@ -489,8 +489,8 @@ private struct KeyOption: View {
             }
             .padding(14)
             .frame(width: 196, height: 150, alignment: .topLeading)
-            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(selected ? Brand.violet.opacity(0.1) : Color(nsColor: .controlBackgroundColor).opacity(hover ? 1 : 0.7)))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(selected ? Brand.violet.opacity(0.7) : Color.primary.opacity(0.08), lineWidth: selected ? 1.5 : 1))
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(selected ? Brand.accent.opacity(0.1) : Color(nsColor: .controlBackgroundColor).opacity(hover ? 1 : 0.7)))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(selected ? Brand.accent.opacity(0.7) : Color.primary.opacity(0.08), lineWidth: selected ? 1.5 : 1))
             .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .buttonStyle(PressableStyle())
@@ -515,7 +515,7 @@ private struct LessonStep: View {
 
     private var title: String {
         switch lesson {
-        case .hold: return done ? "That's Murmur" : "Hold to talk"
+        case .hold: return done ? "That's Oneshot" : "Hold to talk"
         case .handsfree: return done ? "Hands-free, done" : "Talk hands-free"
         case .command: return done ? "Rewritten" : "Rewrite with your voice"
         }
@@ -531,7 +531,7 @@ private struct LessonStep: View {
             return done ? "Great for long messages. Press esc anytime to cancel."
                         : "Double-tap \(k), talk without holding anything, then tap \(k) once to finish."
         case .command:
-            return done ? "Select any text in any app and tell Murmur how to change it."
+            return done ? "Select any text in any app and tell Oneshot how to change it."
                         : "The text below is selected. Hold \(k) and ⌃, then say “make this more professional”."
         }
     }
@@ -559,7 +559,7 @@ private struct LessonStep: View {
             .frame(width: 440, height: 96)
             .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color(nsColor: .textBackgroundColor)))
             .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(done ? Brand.success.opacity(0.7) : focused ? Brand.violet.opacity(0.6) : Color.primary.opacity(0.1),
+                .strokeBorder(done ? Brand.success.opacity(0.7) : focused ? Brand.accent.opacity(0.6) : Color.primary.opacity(0.1),
                               lineWidth: focused || done ? 1.5 : 1))
             .animation(Brand.quick, value: focused)
             .animation(Brand.spring, value: done)
@@ -667,12 +667,12 @@ private struct DoneStep: View {
 
     var body: some View {
         StepScaffold(title: "You're all set",
-                     subtitle: "Hold \(prefs.trigger.short) in any app to start talking. Open Murmur from Spotlight anytime to see your history.") {
+                     subtitle: "Hold \(prefs.trigger.short) in any app to start talking. Open Oneshot from Spotlight anytime to see your history.") {
             DrawnCheck(size: 76).shadow(color: Brand.success.opacity(0.35), radius: 16, y: 6)
         } content: {
-            Toggle("Open Murmur when you log in", isOn: $launchAtLogin).toggleStyle(.switch)
+            Toggle("Open Oneshot when you log in", isOn: $launchAtLogin).toggleStyle(.switch)
         } actions: {
-            Button("Start using Murmur") {
+            Button("Start using Oneshot") {
                 if launchAtLogin { try? SMAppService.mainApp.register() }
                 Prefs.shared.onboarded = true
                 model.onFinish?()

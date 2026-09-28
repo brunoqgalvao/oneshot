@@ -1,6 +1,6 @@
 import AVFoundation
 
-enum MurmurError: LocalizedError {
+enum OneshotError: LocalizedError {
     case noMicrophone
     case microphoneDenied
     case noAPIKey
@@ -31,7 +31,7 @@ struct Recording {
     /// Encodes to AAC (m4a, ~3 KB/s) so uploads stay small on slow connections.
     /// Falls back to 16-bit WAV if the AAC encoder is unavailable.
     func writeCompressed() throws -> URL {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("Murmur", isDirectory: true)
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("Oneshot", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let id = UUID().uuidString
         let m4a = dir.appendingPathComponent("\(id).m4a")
@@ -60,7 +60,7 @@ struct Recording {
     private func write(to url: URL, settings: [String: Any]) throws {
         let file = try AVAudioFile(forWriting: url, settings: settings, commonFormat: .pcmFormatFloat32, interleaved: false)
         guard let buf = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(samples.count)) else {
-            throw MurmurError.noMicrophone
+            throw OneshotError.noMicrophone
         }
         buf.frameLength = AVAudioFrameCount(samples.count)
         samples.withUnsafeBufferPointer { src in
@@ -73,9 +73,9 @@ struct Recording {
     static func load(url: URL) throws -> Recording {
         let file = try AVAudioFile(forReading: url)
         let target = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false)!
-        guard let input = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length)) else { throw MurmurError.badResponse }
+        guard let input = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length)) else { throw OneshotError.badResponse }
         try file.read(into: input)
-        guard let conv = AVAudioConverter(from: file.processingFormat, to: target) else { throw MurmurError.badResponse }
+        guard let conv = AVAudioConverter(from: file.processingFormat, to: target) else { throw OneshotError.badResponse }
         let cap = AVAudioFrameCount(Double(input.frameLength) * 16_000 / file.processingFormat.sampleRate + 1024)
         let out = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: cap)!
         var fed = false
@@ -110,7 +110,7 @@ final class AudioRecorder {
     }
 
     func start() throws {
-        guard Self.permission != .denied, Self.permission != .restricted else { throw MurmurError.microphoneDenied }
+        guard Self.permission != .denied, Self.permission != .restricted else { throw OneshotError.microphoneDenied }
         lock.lock(); samples.removeAll(keepingCapacity: true); samples.reserveCapacity(16_000 * 30); peak = 0; lock.unlock()
 
         // A fresh engine picks up device changes (AirPods connecting, etc.).
@@ -119,7 +119,7 @@ final class AudioRecorder {
         let uid = Prefs.shared.inputDeviceUID
         if !uid.isEmpty, let unit = input.audioUnit { AudioDevices.select(uid: uid, on: unit) }
         let format = input.outputFormat(forBus: 0)
-        guard format.sampleRate > 0, format.channelCount > 0 else { throw MurmurError.noMicrophone }
+        guard format.sampleRate > 0, format.channelCount > 0 else { throw OneshotError.noMicrophone }
         converter = AVAudioConverter(from: format, to: target)
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
             self?.process(buffer)

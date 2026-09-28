@@ -21,7 +21,7 @@ struct FocusSnapshot {
         s.appName = app?.localizedName
         s.bundleID = app?.bundleIdentifier
         s.pid = app?.processIdentifier
-        // Murmur's own window: read the field directly (asking AX about ourselves can stall).
+        // Oneshot's own window: read the field directly (asking AX about ourselves can stall).
         if s.pid == ProcessInfo.processInfo.processIdentifier {
             if let tv = NSApp.keyWindow?.firstResponder as? NSTextView {
                 s.role = kAXTextAreaRole as String

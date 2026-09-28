@@ -24,7 +24,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         if controller.isRecording { symbol = "waveform"; tint = .systemRed }
         else if !controller.hotkeyActive { symbol = "waveform.slash" }
         else { symbol = "waveform" }
-        let img = NSImage(systemSymbolName: symbol, accessibilityDescription: "Murmur")?
+        let img = NSImage(systemSymbolName: symbol, accessibilityDescription: "Oneshot")?
             .withSymbolConfiguration(.init(pointSize: 14, weight: .medium))
         img?.isTemplate = true
         button.image = img
@@ -75,7 +75,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             menu.addItem(.separator())
         }
 
-        menu.addItem(make("Open Murmur", "macwindow", #selector(openMain)))
+        menu.addItem(make("Open Oneshot", "macwindow", #selector(openMain)))
         menu.addItem(.separator())
         menu.addItem(make(controller.isRecording ? "Stop Dictation" : "Start Dictation", controller.isRecording ? "stop.circle" : "mic", #selector(toggle)))
         if !controller.isRecording { menu.addItem(make("Command Mode", "sparkles", #selector(command))) }
@@ -118,8 +118,13 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         menu.addItem(recent)
 
         menu.addItem(.separator())
+        if let v = Updater.shared.available {
+            menu.addItem(make("Update to \(v)", "arrow.down.circle", #selector(update)))
+        }
+        let replies = FeedbackStore.shared.unreadReplies
+        menu.addItem(make(replies > 0 ? "Feedback (\(replies) new \(replies == 1 ? "reply" : "replies"))" : "Send Feedback…", "bubble.left", #selector(feedback)))
         menu.addItem(make("Settings…", "gearshape", #selector(openSettings), key: ","))
-        menu.addItem(make("Quit Murmur", "power", #selector(quit), key: "q"))
+        menu.addItem(make("Quit Oneshot", "power", #selector(quit), key: "q"))
     }
 
     private func make(_ title: String, _ symbol: String, _ sel: Selector?, key: String = "") -> NSMenuItem {
@@ -133,6 +138,8 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     @objc private func command() { controller.startCommand() }
     @objc private func retry() { controller.retryLast() }
     @objc private func pasteLast() { controller.pasteLast() }
+    @objc private func update() { Updater.shared.install() }
+    @objc private func feedback() { AppDelegate.shared?.showMain(.feedback) }
     @objc private func openMain() { AppDelegate.shared?.showMain(.home) }
     @objc private func openSettings() { controller.openSettings?("general") }
     @objc private func openSetup() { AppDelegate.shared?.showOnboarding(step: nil) }
@@ -159,7 +166,7 @@ private struct MenuHeader: View {
             HStack(spacing: 10) {
                 Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 30, height: 30)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("Murmur").font(.system(size: 13, weight: .semibold))
+                    Text("Oneshot").font(.system(size: 13, weight: .semibold))
                     Text(status).font(.system(size: 11.5)).foregroundColor(.secondary)
                 }
                 Spacer()

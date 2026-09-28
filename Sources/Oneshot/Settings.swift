@@ -64,7 +64,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     func show(_ pane: Pane?, activate: Bool = true) {
         if window == nil { build() }
         if let pane, let i = Pane.allCases.firstIndex(of: pane) { tabs.selectedTabViewItemIndex = i }
-        window?.title = tabs.tabView.selectedTabViewItem?.label ?? "Murmur"
+        window?.title = tabs.tabView.selectedTabViewItem?.label ?? "Oneshot"
         guard activate else { window?.orderFrontRegardless(); return }
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
@@ -113,11 +113,11 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 final class TitledTabViewController: NSTabViewController {
     override func tabView(_ tabView: NSTabView, didSelect tabViewItem: NSTabViewItem?) {
         super.tabView(tabView, didSelect: tabViewItem)
-        view.window?.title = tabViewItem?.label ?? "Murmur"
+        view.window?.title = tabViewItem?.label ?? "Oneshot"
     }
     override func viewDidAppear() {
         super.viewDidAppear()
-        view.window?.title = tabView.selectedTabViewItem?.label ?? "Murmur"
+        view.window?.title = tabView.selectedTabViewItem?.label ?? "Oneshot"
     }
 }
 
@@ -156,7 +156,7 @@ struct GeneralPane: View {
             } header: { Text("Input") }
 
             Section {
-                Toggle("Show the Murmur dot at the bottom of the screen", isOn: $prefs.showIndicator)
+                Toggle("Show the Oneshot dot at the bottom of the screen", isOn: $prefs.showIndicator)
                 Toggle("Play sounds", isOn: $prefs.sounds)
                 Toggle(isOn: $prefs.keepOnClipboard) {
                     VStack(alignment: .leading, spacing: 2) {
@@ -233,7 +233,7 @@ struct AccountPane: View {
                     }
                 }
                 .padding(.vertical, 4)
-            } header: { Text("How Murmur transcribes") }
+            } header: { Text("How Oneshot transcribes") }
 
             Section {
                 switch prefs.engine {
@@ -259,7 +259,7 @@ struct AccountPane: View {
                         Text("gpt-4.1-mini").tag("gpt-4.1-mini")
                     }
                 case .apple:
-                    Text("Audio never leaves this Mac. Cleanup and Command mode need a Murmur account or an OpenAI key.")
+                    Text("Audio never leaves this Mac. Cleanup and Command mode need a Oneshot account or an OpenAI key.")
                         .font(.system(size: 12)).foregroundColor(.secondary)
                     if AppleTranscriber.status != .authorized {
                         Button("Allow Speech Recognition") { AppleTranscriber.requestPermission { _ in } }
@@ -307,7 +307,7 @@ private struct EngineCard: View {
 
     private var info: (String, String, String) {
         switch engine {
-        case .cloud: return ("sparkles", "Murmur account", "Free. Best accuracy and cleanup, nothing to set up.")
+        case .cloud: return ("sparkles", "Oneshot account", "Free. Best accuracy and cleanup, nothing to set up.")
         case .openAI: return ("key.fill", "Your own OpenAI key", "Calls OpenAI directly; billed to your account.")
         case .apple: return ("lock.fill", "On this Mac", "Private and offline. Less accurate, no cleanup.")
         }
@@ -329,13 +329,13 @@ private struct EngineCard: View {
                 }
                 Spacer()
                 ZStack {
-                    Circle().strokeBorder(selected ? Brand.violet : Color.secondary.opacity(0.4), lineWidth: selected ? 5 : 1.5)
+                    Circle().strokeBorder(selected ? Brand.accent : Color.secondary.opacity(0.4), lineWidth: selected ? 5 : 1.5)
                 }
                 .frame(width: 18, height: 18)
             }
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(selected ? Brand.violet.opacity(0.09) : Color.primary.opacity(hover ? 0.04 : 0)))
+                .fill(selected ? Brand.accent.opacity(0.09) : Color.primary.opacity(hover ? 0.04 : 0)))
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(PressableStyle())
@@ -359,8 +359,8 @@ struct TermChip: View {
             .onHover { hover = $0 }
         }
         .padding(.leading, 10).padding(.trailing, 5).padding(.vertical, 4)
-        .background(Capsule().fill(Brand.violet.opacity(0.12)))
-        .overlay(Capsule().strokeBorder(Brand.violet.opacity(0.2)))
+        .background(Capsule().fill(Brand.accent.opacity(0.12)))
+        .overlay(Capsule().strokeBorder(Brand.accent.opacity(0.2)))
     }
 }
 
@@ -371,9 +371,9 @@ struct StyleRow: View {
     let sample: String
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: symbol).font(.system(size: 12, weight: .semibold)).foregroundColor(Brand.violet)
+            Image(systemName: symbol).font(.system(size: 12, weight: .semibold)).foregroundColor(Brand.accent)
                 .frame(width: 26, height: 26)
-                .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Brand.violet.opacity(0.12)))
+                .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Brand.accent.opacity(0.12)))
             VStack(alignment: .leading, spacing: 1) {
                 Text(title).font(.system(size: 13, weight: .medium))
                 Text(detail).font(.system(size: 11)).foregroundColor(.secondary)
@@ -529,7 +529,7 @@ private struct HistoryRow: View {
                     .lineLimit(showRaw ? nil : 8)
                     .textSelection(.enabled)
                 HStack(spacing: 5) {
-                    if d.mode == "command" { Image(systemName: "sparkles").foregroundColor(Brand.violet) }
+                    if d.mode == "command" { Image(systemName: "sparkles").foregroundColor(Brand.accent) }
                     Text(d.app ?? "Unknown app")
                     Text("·")
                     Text(d.date.formatted(date: .omitted, time: .shortened))

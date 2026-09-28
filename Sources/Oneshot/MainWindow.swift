@@ -7,7 +7,7 @@ import Charts
 @MainActor
 final class MainNav: ObservableObject {
     enum Page: String, CaseIterable, Identifiable {
-        case home, history, dictionary, style
+        case home, history, dictionary, style, feedback
         var id: String { rawValue }
         var title: String {
             switch self {
@@ -15,6 +15,7 @@ final class MainNav: ObservableObject {
             case .history: return "History"
             case .dictionary: return "Dictionary"
             case .style: return "Style"
+            case .feedback: return "Feedback"
             }
         }
         var symbol: String {
@@ -23,6 +24,7 @@ final class MainNav: ObservableObject {
             case .history: return "clock.arrow.circlepath"
             case .dictionary: return "character.book.closed"
             case .style: return "wand.and.stars"
+            case .feedback: return "bubble.left.and.text.bubble.right"
             }
         }
     }
@@ -42,12 +44,12 @@ final class MainWindowController: NSObject, NSWindowDelegate {
             w.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
             w.titlebarAppearsTransparent = true
             w.titleVisibility = .hidden
-            w.title = "Murmur"
+            w.title = "Oneshot"
             w.isReleasedWhenClosed = false
             w.setContentSize(NSSize(width: 940, height: 660))
             w.minSize = NSSize(width: 820, height: 560)
-            w.setFrameAutosaveName("MurmurMain")
-            if !w.setFrameUsingName("MurmurMain") { w.center() }
+            w.setFrameAutosaveName("OneshotMain")
+            if !w.setFrameUsingName("OneshotMain") { w.center() }
             w.delegate = self
             window = w
         }
@@ -80,6 +82,7 @@ struct MainView: View {
                 case .history: PageScaffold(title: "History", subtitle: "Everything you've dictated, searchable.") { HistoryPane(embedded: true) }
                 case .dictionary: DictionaryPage()
                 case .style: StylePage()
+                case .feedback: FeedbackPage()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -92,19 +95,21 @@ struct MainView: View {
 
 private struct Sidebar: View {
     @ObservedObject var nav: MainNav
+    @ObservedObject private var feedback = FeedbackStore.shared
     var body: some View {
         List(selection: $nav.page) {
             ForEach(MainNav.Page.allCases) { p in
                 Label(p.title, systemImage: p.symbol).tag(p)
                     .font(.system(size: 13))
                     .padding(.vertical, 2)
+                    .badge(p == .feedback ? feedback.unreadReplies : 0)
             }
         }
         .listStyle(.sidebar)
         .safeAreaInset(edge: .top) {
             HStack(spacing: 9) {
                 Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 26, height: 26)
-                Text("Murmur").font(.system(size: 15, weight: .semibold))
+                Text("Oneshot").font(.system(size: 15, weight: .semibold))
                 Spacer()
             }
             .padding(.horizontal, 18).padding(.top, 34).padding(.bottom, 10)
@@ -183,6 +188,7 @@ private struct HomePage: View {
     @ObservedObject private var prefs = Prefs.shared
     @ObservedObject private var controller = AppController.shared
     @ObservedObject private var account = Account.shared
+    @ObservedObject private var updater = Updater.shared
 
     private var greeting: String {
         let h = Calendar.current.component(.hour, from: Date())
@@ -205,6 +211,9 @@ private struct HomePage: View {
                     .staggerIn(1)
                 }
 
+                if let v = updater.available {
+                    UpdateBanner(version: v).staggerIn(2)
+                }
                 if prefs.engine == .cloud && !account.isSignedIn {
                     SignInBanner().staggerIn(2)
                 }
@@ -283,7 +292,7 @@ private struct WeekCard: View {
                 }
                 Chart(days, id: \.day) { d in
                     BarMark(x: .value("Day", d.day, unit: .day), y: .value("Words", d.words), width: .ratio(0.55))
-                        .foregroundStyle(Calendar.current.isDateInToday(d.day) ? AnyShapeStyle(Brand.gradient) : AnyShapeStyle(Brand.violet.opacity(0.35)))
+                        .foregroundStyle(Calendar.current.isDateInToday(d.day) ? AnyShapeStyle(Brand.gradient) : AnyShapeStyle(Brand.accent.opacity(0.35)))
                         .cornerRadius(5)
                 }
                 .chartXAxis {
@@ -306,9 +315,9 @@ private struct MetricCard: View {
         Card {
             HStack(spacing: 12) {
                 Image(systemName: symbol)
-                    .font(.system(size: 13, weight: .semibold)).foregroundColor(Brand.violet)
+                    .font(.system(size: 13, weight: .semibold)).foregroundColor(Brand.accent)
                     .frame(width: 30, height: 30)
-                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Brand.violet.opacity(0.12)))
+                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Brand.accent.opacity(0.12)))
                 VStack(alignment: .leading, spacing: 1) {
                     Text(value).font(.system(size: 17, weight: .semibold, design: .rounded).monospacedDigit())
                     Text(label).font(.system(size: 11)).foregroundColor(.secondary)
@@ -328,7 +337,7 @@ private struct RecentRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(d.text).font(.system(size: 13)).lineLimit(2)
                 HStack(spacing: 4) {
-                    if d.mode == "command" { Image(systemName: "sparkles").foregroundColor(Brand.violet) }
+                    if d.mode == "command" { Image(systemName: "sparkles").foregroundColor(Brand.accent) }
                     Text(d.app ?? "Unknown app")
                     Text("·")
                     Text(d.date, style: .relative)
@@ -404,7 +413,7 @@ private struct FirstDictationCard: View {
                 KeyCap(label: prefs.trigger.cap, pressed: controller.triggerHeld || controller.isRecording, large: true)
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Try your first dictation").font(.system(size: 16, weight: .semibold))
-                    Text("Click the box, hold \(prefs.trigger.short), and say anything. Murmur removes the “ums”, fixes corrections and punctuates for you.")
+                    Text("Click the box, hold \(prefs.trigger.short), and say anything. Oneshot removes the “ums”, fixes corrections and punctuates for you.")
                         .font(.system(size: 12.5)).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
                     TextField("Your words appear here…", text: $text, axis: .vertical)
                         .lineLimit(2...4)
@@ -413,6 +422,30 @@ private struct FirstDictationCard: View {
             }
             .padding(6)
         }
+    }
+}
+
+private struct UpdateBanner: View {
+    let version: String
+    @ObservedObject private var updater = Updater.shared
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "arrow.down.circle.fill")
+                .font(.system(size: 18, weight: .semibold)).foregroundColor(.white)
+                .frame(width: 38, height: 38)
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Brand.gradient))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Oneshot \(version) is ready").font(.system(size: 13.5, weight: .semibold))
+                Text("Takes a few seconds. Oneshot restarts by itself.").font(.system(size: 12)).foregroundColor(.secondary)
+            }
+            Spacer()
+            Button(updater.installing ? "Updating…" : "Update now") { updater.install() }
+                .buttonStyle(PrimaryButtonStyle())
+                .disabled(updater.installing)
+        }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color(nsColor: .controlBackgroundColor)))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Brand.accent.opacity(0.35), lineWidth: 1.2))
     }
 }
 
@@ -433,8 +466,8 @@ private struct SignInBanner: View {
         }
         .padding(14)
         .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color(nsColor: .controlBackgroundColor)))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Brand.violet.opacity(0.35), lineWidth: 1.2))
-        .shadow(color: Brand.violet.opacity(0.12), radius: 10, y: 3)
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Brand.accent.opacity(0.35), lineWidth: 1.2))
+        .shadow(color: Brand.accent.opacity(0.12), radius: 10, y: 3)
     }
 }
 
@@ -445,9 +478,9 @@ private struct TipCard: View {
         return [
             ("sparkles", "Rewrite anything", "Select text, hold \(k) and ⌃, then say “make this friendlier” or “translate to English”."),
             ("hands.and.sparkles", "Go hands-free", "Double-tap \(k) to dictate without holding the key. Tap it again when you're done."),
-            ("character.book.closed", "Teach it your words", "Add names and jargon to your Dictionary so Murmur spells them right."),
-            ("arrow.uturn.backward", "Change your mind mid-sentence", "Say “at 2, actually 3” and Murmur keeps only what you meant."),
-            ("list.bullet", "Speak in lists", "Say “first… second… third…” and Murmur formats a list in docs and AI prompts."),
+            ("character.book.closed", "Teach it your words", "Add names and jargon to your Dictionary so Oneshot spells them right."),
+            ("arrow.uturn.backward", "Change your mind mid-sentence", "Say “at 2, actually 3” and Oneshot keeps only what you meant."),
+            ("list.bullet", "Speak in lists", "Say “first… second… third…” and Oneshot formats a list in docs and AI prompts."),
         ]
     }
     var body: some View {
@@ -465,8 +498,8 @@ private struct TipCard: View {
             Spacer(minLength: 0)
         }
         .padding(16)
-        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Brand.violet.opacity(0.07)))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Brand.violet.opacity(0.15)))
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Brand.accent.opacity(0.07)))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Brand.accent.opacity(0.15)))
     }
 }
 
@@ -478,10 +511,10 @@ private struct DictionaryPage: View {
     @FocusState private var focused: Bool
 
     var body: some View {
-        PageScaffold(title: "Dictionary", subtitle: "Names, products and jargon Murmur should always spell your way.") {
+        PageScaffold(title: "Dictionary", subtitle: "Names, products and jargon Oneshot should always spell your way.") {
             VStack(alignment: .leading, spacing: 18) {
                 HStack(spacing: 10) {
-                    Image(systemName: "plus.circle.fill").foregroundColor(Brand.violet).font(.system(size: 16))
+                    Image(systemName: "plus.circle.fill").foregroundColor(Brand.accent).font(.system(size: 16))
                     TextField("Add a word, then press Return", text: $newTerm)
                         .textFieldStyle(.plain).font(.system(size: 14))
                         .focused($focused)
@@ -490,14 +523,14 @@ private struct DictionaryPage: View {
                 .padding(.horizontal, 14).frame(height: 44)
                 .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color(nsColor: .controlBackgroundColor)))
                 .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .strokeBorder(focused ? Brand.violet.opacity(0.6) : Color.primary.opacity(0.08), lineWidth: focused ? 1.5 : 1))
+                    .strokeBorder(focused ? Brand.accent.opacity(0.6) : Color.primary.opacity(0.08), lineWidth: focused ? 1.5 : 1))
                 .animation(Brand.quick, value: focused)
 
                 if prefs.vocabularyTerms.isEmpty {
                     VStack(spacing: 10) {
                         SymbolTile(symbol: "character.book.closed.fill", size: 56)
                         Text("Your dictionary is empty").font(.system(size: 15, weight: .semibold))
-                        Text("Add your name, your company, product names or acronyms.\nMurmur listens for them and spells them exactly as written.")
+                        Text("Add your name, your company, product names or acronyms.\nOneshot listens for them and spells them exactly as written.")
                             .font(.system(size: 12.5)).foregroundColor(.secondary).multilineTextAlignment(.center)
                     }
                     .frame(maxWidth: .infinity).padding(.top, 50)
@@ -531,7 +564,7 @@ private struct DictionaryPage: View {
 private struct StylePage: View {
     @ObservedObject private var prefs = Prefs.shared
     var body: some View {
-        PageScaffold(title: "Style", subtitle: "How Murmur turns what you say into what you'd have typed.") {
+        PageScaffold(title: "Style", subtitle: "How Oneshot turns what you say into what you'd have typed.") {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     Card {

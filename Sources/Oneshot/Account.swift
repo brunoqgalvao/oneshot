@@ -39,7 +39,7 @@ struct DictateResult: Decodable {
     var usage: CloudUsage?
 }
 
-/// Talks to the Murmur server, which holds the OpenAI key and runs the prompts.
+/// Talks to the Oneshot server, which holds the OpenAI key and runs the prompts.
 struct CloudClient {
     let base: URL
     let token: String?
@@ -115,17 +115,17 @@ struct CloudClient {
     }
 
     private static func check(_ resp: URLResponse, _ data: Data) throws {
-        guard let http = resp as? HTTPURLResponse else { throw MurmurError.badResponse }
+        guard let http = resp as? HTTPURLResponse else { throw OneshotError.badResponse }
         guard (200..<300).contains(http.statusCode) else {
             let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
             throw CloudError.server(status: http.statusCode,
                                     code: obj?["error"] as? String ?? "http_\(http.statusCode)",
-                                    message: obj?["message"] as? String ?? "Murmur server error (\(http.statusCode))")
+                                    message: obj?["message"] as? String ?? "Oneshot server error (\(http.statusCode))")
         }
     }
 }
 
-/// The signed-in Murmur account. The session token is kept in a 0600 file.
+/// The signed-in Oneshot account. The session token is kept in a 0600 file.
 @MainActor
 final class Account: ObservableObject {
     static let shared = Account()
@@ -168,7 +168,7 @@ final class Account: ObservableObject {
     }
 
     /// Opens Google sign-in in the browser. The server sends the browser back to
-    /// murmur://auth with a one-time code that only this app (holding the PKCE
+    /// oneshot://auth with a one-time code that only this app (holding the PKCE
     /// verifier) can exchange for a session.
     func signInWithGoogle() {
         let verifier = Self.randomURLSafe(32)
@@ -256,8 +256,8 @@ final class Account: ObservableObject {
         if let e = error as? URLError {
             switch e.code {
             case .notConnectedToInternet: return "You're offline."
-            case .cannotFindHost, .cannotConnectToHost: return "Can't reach the Murmur server."
-            case .timedOut: return "The Murmur server took too long to answer."
+            case .cannotFindHost, .cannotConnectToHost: return "Can't reach the Oneshot server."
+            case .timedOut: return "The Oneshot server took too long to answer."
             default: return "Network error."
             }
         }

@@ -334,8 +334,8 @@ private struct PillBackground: View {
                 LinearGradient(colors: [.white.opacity(0.2), .white.opacity(0.05)], startPoint: .top, endPoint: .bottom),
                 lineWidth: 1)
             if command {
-                Capsule().strokeBorder(Brand.violet.opacity(0.75), lineWidth: 1.2)
-                    .shadow(color: Brand.violet.opacity(0.6), radius: 8)
+                Capsule().strokeBorder(Brand.accent.opacity(0.75), lineWidth: 1.2)
+                    .shadow(color: Brand.accent.opacity(0.6), radius: 8)
                     .transition(.opacity)
             }
         }

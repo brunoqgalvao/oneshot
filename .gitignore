@@ -1,6 +1,8 @@
-.build/
-build/
-.signing/
+*.zip
 .DS_Store
+.build/
 .server-url
+.signing/
+build/
+dist/
 server/data/

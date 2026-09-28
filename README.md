@@ -1,50 +1,56 @@
-# Murmur
+<p align="center"><img src="server/public/icon.png" width="96" alt="Oneshot"></p>
+<h1 align="center">Oneshot</h1>
+<p align="center"><b>Say it once.</b> Free, open-source voice dictation for Mac.</p>
+<p align="center"><a href="https://oneshot.fm">oneshot.fm</a> · <a href="https://github.com/brunoqgalvao/oneshot/releases/latest">Download</a></p>
 
-Voice dictation for macOS that works in any app, in the style of Wispr Flow. Hold **fn**, talk, release: the transcript is cleaned up by an LLM and pasted where your cursor is.
+Hold a key, talk like you normally talk, and clean, punctuated text lands wherever your cursor is: Slack, Gmail, Cursor, Notion, the terminal.
 
-Users sign up for a free Murmur account inside the app (email + password); the [server](server/README.md) holds the OpenAI key, runs transcription and cleanup, and enforces a daily free allowance. Bringing your own OpenAI key, or transcribing fully on-device, are options in Settings → AI.
+```sh
+curl -fsSL https://oneshot.fm/install.sh | sh
+```
 
-## Use
+## What it does
 
-Opening Murmur shows its home window: weekly words, time saved, speaking speed, recent dictations, plus History, Dictionary and Style pages. Settings (⌘,) holds the dictation key, microphone, permissions and account.
-
-
-| Keys | What happens |
+| Keys | |
 | --- | --- |
-| Hold fn | Dictate; release to insert |
-| Double-tap fn, or fn + Space | Hands-free; tap fn (or the red button) to finish |
-| Hold ⌃ Control while dictating | Command mode: rewrites the selected text, or writes something new |
-| Esc | Cancel |
+| Hold **fn** | Dictate, release to insert |
+| Double-tap **fn**, or **fn + Space** | Hands-free, tap again to finish |
+| Hold **⌃** while dictating | Rewrite the selected text ("make this friendlier", "translate to English") |
+| **esc** | Cancel |
 
-The key can be changed to Right ⌥ or Right ⌘ in Settings → General. Recent dictations are in the menu bar icon and in Settings → History.
-
-URL scheme for Shortcuts/Raycast: `murmur://toggle`, `start`, `stop`, `cancel`, `command`, `settings`.
+- Removes fillers and applies corrections: "at 2, actually 3" becomes "at 3". Spoken lists become lists.
+- Adapts to where you type: casual in chat, full sentences in email, exact in code and AI prompts.
+- Your vocabulary (names, products, jargon) is spelled your way.
+- Every dictation stays on your clipboard and in your history.
+- Free (30 minutes a day), your own OpenAI key (unlimited), or fully on-device with Apple's speech recognition.
+- Feedback inside the app goes to an AI engineer (Claude Opus) that runs in a loop on this repo: it ships what it can and replies to you in the app. Oneshot updates itself.
 
 ## How it works
 
-1. **Hotkey**: a `CGEventTap` watches modifier changes for the chosen key and swallows Space/Esc only while dictating.
-2. **Context**: when you press the key, the Accessibility API reads the frontmost app, window title, up to 600 characters before the cursor and any selection. Password fields are detected and skipped.
-3. **Audio**: `AVAudioEngine` records 16 kHz mono and drives the waveform; the clip is encoded to AAC (~6x smaller than WAV) before upload. The TLS connection is opened when recording starts.
-4. **Transcription + cleanup**: one upload to the Murmur server (`POST /v1/dictate`), which calls OpenAI `gpt-4o-transcribe` biased with your vocabulary, then `gpt-5.4-mini` with reasoning off to remove fillers, apply self-corrections ("at 2, actually 3" -> "at 3"), handle "new line"/lists and adapt tone to the destination (chat, email, code, AI prompt, docs). A guard falls back to the raw transcript if the model answers instead of cleaning. If the server is unreachable, Apple's on-device recognizer takes over.
-5. **Account**: the session token lives in `~/Library/Application Support/Murmur/session.token` (mode 600); the menu shows today's free minutes left.
-6. **Insert**: the text goes on the pasteboard (marked transient so clipboard managers ignore it), ⌘V is sent, and your previous clipboard is restored.
-
-## Build
-
-Requires the Xcode Command Line Tools (Swift 5.9+), macOS 13+.
-
-```sh
-./build.sh --open
+```
+fn held ─▶ CGEventTap ─▶ AVAudioEngine (16 kHz) ─▶ AAC ─▶ server ─▶ gpt-4o-transcribe
+                                                              └─▶ gpt-5.4-mini cleanup ─▶ ⌘V into the focused app
 ```
 
-The server runs at https://murmur-dictation.fly.dev (Fly.io, São Paulo); `build.sh` reads the URL from `.server-url`. Run it locally with `cd server && OPENAI_API_KEY=sk-... bun start`, or deploy with `server/deploy.sh`, which writes the public URL to `.server-url` and rebuilds the app against it.
+- **App** (`Sources/Oneshot`, Swift + SwiftUI, no dependencies): menu bar app with a floating HUD, an always-on indicator, onboarding, and a home window with history, dictionary, style and feedback. Reads the text around the cursor with the Accessibility API for context (never password fields).
+- **Server** (`server/`, Bun + SQLite, no dependencies): accounts (email/password or Google), daily free allowance with a global cost cap, transcription + cleanup in one request, feedback, and the website. Deployed on Fly.io.
 
-The first build creates a self-signed identity in `.signing/` so macOS keeps the Accessibility and Microphone permissions across rebuilds.
+## Build it yourself
 
-Test the pipeline without the mic:
+Needs the Xcode Command Line Tools (Swift 5.9+) and macOS 13+.
 
 ```sh
-BIN=build/Murmur.app/Contents/MacOS/Murmur
-$BIN --signup you@example.com 'a-password'      # or --login
-$BIN --transcribe clip.wav --app com.tinyspeck.slackmacgap
+./build.sh --open                                    # app, pointed at http://localhost:8787 or .server-url
+cd server && OPENAI_API_KEY=sk-... bun start         # server
+cd server && bun test                                # server tests (mock OpenAI and Google)
 ```
+
+Releases: `./release.sh 0.2.1 "notes"` builds, zips and publishes a GitHub release; installed apps pick it up and update themselves.
+
+## Privacy
+
+Audio is sent to the Oneshot server only while you hold the key, transcribed, and discarded. Neither audio nor text is stored on the server. History stays on your Mac. With your own key, audio goes straight to OpenAI; on-device mode never leaves your Mac.
+
+## License
+
+MIT. Built by [Bruno Galvão](https://github.com/brunoqgalvao), one-shot by Claude.

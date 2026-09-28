@@ -53,7 +53,7 @@ enum Engine: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var label: String {
         switch self {
-        case .cloud: return "Murmur account (free)"
+        case .cloud: return "Oneshot account (free)"
         case .openAI: return "Your own OpenAI key"
         case .apple: return "On this Mac (private, offline)"
         }
@@ -91,16 +91,17 @@ final class Prefs: ObservableObject {
     /// Debug/testing: when set, recordings use this audio file instead of the microphone.
     var debugAudioFile: String? { d.string(forKey: "debugAudioFile") }
 
-    /// The Murmur server. Baked into Info.plist at build time; overridable with
-    /// `defaults write com.brunogalvao.murmur serverURL http://localhost:8787`.
+    /// The Oneshot server. Baked into Info.plist at build time; overridable with
+    /// `defaults write fm.oneshot.app serverURL http://localhost:8787`.
     var serverURL: URL {
         let s = d.string(forKey: "serverURL")
-            ?? Bundle.main.object(forInfoDictionaryKey: "MurmurServerURL") as? String
+            ?? Bundle.main.object(forInfoDictionaryKey: "OneshotServerURL") as? String
             ?? "http://localhost:8787"
         return URL(string: s) ?? URL(string: "http://localhost:8787")!
     }
 
     private init() {
+        Self.migrateFromMurmur(d)
         d.register(defaults: [
             "trigger": TriggerKey.fn.rawValue,
             "engine": Engine.cloud.rawValue,
@@ -133,6 +134,15 @@ final class Prefs: ObservableObject {
         apiKey = Secrets.loadOpenAIKey() ?? ""
     }
 
+    /// The app used to be called Murmur (bundle id com.brunogalvao.murmur): carry settings over once.
+    private static func migrateFromMurmur(_ d: UserDefaults) {
+        guard !d.bool(forKey: "migratedFromMurmur") else { return }
+        if let old = d.persistentDomain(forName: "com.brunogalvao.murmur") {
+            for (k, v) in old where d.object(forKey: k) == nil { d.set(v, forKey: k) }
+        }
+        d.set(true, forKey: "migratedFromMurmur")
+    }
+
     var vocabularyTerms: [String] {
         vocabulary
             .split(whereSeparator: { $0 == "\n" || $0 == "," })
@@ -151,7 +161,11 @@ final class Prefs: ObservableObject {
 enum Secrets {
     static var dir: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let url = base.appendingPathComponent("Murmur", isDirectory: true)
+        let url = base.appendingPathComponent("Oneshot", isDirectory: true)
+        let old = base.appendingPathComponent("Murmur", isDirectory: true)
+        if !FileManager.default.fileExists(atPath: url.path), FileManager.default.fileExists(atPath: old.path) {
+            try? FileManager.default.moveItem(at: old, to: url)   // renamed from Murmur
+        }
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }

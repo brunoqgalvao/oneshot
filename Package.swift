@@ -2,9 +2,9 @@
 import PackageDescription
 
 let package = Package(
-    name: "Murmur",
+    name: "Oneshot",
     platforms: [.macOS(.v13)],
     targets: [
-        .executableTarget(name: "Murmur", path: "Sources/Murmur")
+        .executableTarget(name: "Oneshot", path: "Sources/Oneshot")
     ]
 )

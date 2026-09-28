@@ -4,7 +4,7 @@ import { config } from "./config";
  * Google sign-in for the desktop app, with PKCE between the app and this server:
  *   app  -> GET /auth/google/start?state&challenge   (opens in the browser)
  *   here -> Google consent -> GET /auth/google/callback
- *   here -> murmur://auth?code&state                  (one-time code, 5 minutes)
+ *   here -> oneshot://auth?code&state                  (one-time code, 5 minutes)
  *   app  -> POST /v1/auth/exchange {code, verifier}   -> session token
  */
 type Pending = { challenge: string; created: number };
@@ -44,7 +44,7 @@ export function startURL(state: string, challenge: string): string | null {
 export async function finish(code: string, state: string) {
   const p = pending.get(state);
   pending.delete(state);
-  if (!p || Date.now() - p.created > TTL * 2) throw new Error("This sign-in link expired. Start again from Murmur.");
+  if (!p || Date.now() - p.created > TTL * 2) throw new Error("This sign-in link expired. Start again from Oneshot.");
   const res = await fetch(config.googleTokenURL, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -84,7 +84,7 @@ const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&l
 
 export function page(title: string, message: string, appURL?: string) {
   const open = appURL
-    ? `<a class="btn" href="${esc(appURL)}">Open Murmur</a><script>setTimeout(()=>{location.href=${JSON.stringify(appURL)}},150)</script>`
+    ? `<a class="btn" href="${esc(appURL)}">Open Oneshot</a><script>setTimeout(()=>{location.href=${JSON.stringify(appURL)}},150)</script>`
     : "";
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
 <title>${esc(title)}</title>

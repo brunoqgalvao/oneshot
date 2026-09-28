@@ -45,7 +45,7 @@ struct OpenAIClient {
         let (data, resp) = try await Self.session.upload(for: req, from: body)
         try Self.check(resp, data)
         guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let text = obj["text"] as? String else { throw MurmurError.badResponse }
+              let text = obj["text"] as? String else { throw OneshotError.badResponse }
         return text
     }
 
@@ -72,17 +72,17 @@ struct OpenAIClient {
         guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let choices = obj["choices"] as? [[String: Any]],
               let msg = choices.first?["message"] as? [String: Any],
-              let content = msg["content"] as? String else { throw MurmurError.badResponse }
+              let content = msg["content"] as? String else { throw OneshotError.badResponse }
         return content
     }
 
     private static func check(_ resp: URLResponse, _ data: Data) throws {
-        guard let http = resp as? HTTPURLResponse else { throw MurmurError.badResponse }
+        guard let http = resp as? HTTPURLResponse else { throw OneshotError.badResponse }
         guard (200..<300).contains(http.statusCode) else {
             var msg = HTTPURLResponse.localizedString(forStatusCode: http.statusCode)
             if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let err = obj["error"] as? [String: Any], let m = err["message"] as? String { msg = m }
-            throw MurmurError.http(http.statusCode, msg)
+            throw OneshotError.http(http.statusCode, msg)
         }
     }
 }

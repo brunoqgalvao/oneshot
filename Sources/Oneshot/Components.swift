@@ -4,13 +4,14 @@ import AppKit
 // MARK: - Design tokens
 
 enum Brand {
-    static let violet = Color(red: 0.42, green: 0.35, blue: 0.98)
-    static let violetDeep = Color(red: 0.24, green: 0.18, blue: 0.62)
+    /// Oneshot orange: the "shot". Deep enough for white text on buttons.
+    static let accent = Color(red: 0.93, green: 0.30, blue: 0.16)
+    static let accentDeep = Color(red: 0.78, green: 0.18, blue: 0.10)
     static let commandTint = Color(red: 0.78, green: 0.72, blue: 1)
     static let recordRed = Color(red: 1, green: 0.29, blue: 0.33)
     static let success = Color(red: 0.25, green: 0.82, blue: 0.47)
     static var gradient: LinearGradient {
-        LinearGradient(colors: [violet, violetDeep], startPoint: .topLeading, endPoint: .bottomTrailing)
+        LinearGradient(colors: [Color(red: 1, green: 0.45, blue: 0.24), accentDeep], startPoint: .topLeading, endPoint: .bottomTrailing)
     }
     /// Critically damped springs (no bounce), interruptible.
     static let spring = Animation.spring(response: 0.34, dampingFraction: 1)
@@ -22,7 +23,7 @@ enum Brand {
 // MARK: - Buttons
 
 struct PrimaryButtonStyle: ButtonStyle {
-    var tint: Color = Brand.violet
+    var tint: Color = Brand.accent
     var fullWidth = false
     @Environment(\.isEnabled) private var enabled
 
@@ -94,7 +95,7 @@ struct KeyCap: View {
             .overlay(RoundedRectangle(cornerRadius: r, style: .continuous).strokeBorder(Color.primary.opacity(pressed ? 0 : 0.12), lineWidth: 1))
             // The key's "side": a hard shadow that flattens when pressed.
             .shadow(color: .black.opacity(pressed ? 0 : 0.14), radius: 0, x: 0, y: large ? 3 : 1.5)
-            .shadow(color: Brand.violet.opacity(pressed ? 0.45 : 0), radius: large ? 18 : 6)
+            .shadow(color: Brand.accent.opacity(pressed ? 0.45 : 0), radius: large ? 18 : 6)
             .offset(y: pressed ? (large ? 3 : 1) : 0)
             .animation(Brand.quick, value: pressed)
     }
@@ -249,7 +250,7 @@ struct SymbolTile: View {
             .background(RoundedRectangle(cornerRadius: size * 0.26, style: .continuous).fill(Brand.gradient))
             .overlay(RoundedRectangle(cornerRadius: size * 0.26, style: .continuous)
                 .strokeBorder(LinearGradient(colors: [.white.opacity(0.35), .white.opacity(0.02)], startPoint: .top, endPoint: .bottom), lineWidth: 1))
-            .shadow(color: Brand.violet.opacity(0.35), radius: 14, y: 6)
+            .shadow(color: Brand.accent.opacity(0.35), radius: 14, y: 6)
     }
 }
 

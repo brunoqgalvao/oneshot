@@ -1,6 +1,6 @@
-# Murmur server
+# Oneshot server
 
-Holds the OpenAI key so Murmur users only need a free account. Bun + SQLite, no dependencies.
+Holds the OpenAI key so Oneshot users only need a free account. Bun + SQLite, no dependencies.
 
 | Route | |
 | --- | --- |
