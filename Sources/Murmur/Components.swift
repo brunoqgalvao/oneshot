@@ -81,6 +81,8 @@ struct KeyCap: View {
     var body: some View {
         let r: CGFloat = large ? 12 : 6
         Text(label)
+            .lineLimit(1)
+            .fixedSize()
             .font(.system(size: large ? 26 : 12, weight: .medium, design: .rounded))
             .foregroundColor(pressed ? .white : .primary.opacity(0.85))
             .padding(.horizontal, large ? 22 : 7)

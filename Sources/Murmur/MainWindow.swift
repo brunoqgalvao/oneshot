@@ -198,7 +198,7 @@ private struct HomePage: View {
                     Text(greeting).font(.system(size: 28, weight: .bold)).staggerIn(0)
                     HStack(spacing: 6) {
                         Text("Hold")
-                        KeyCap(label: prefs.trigger == .fn ? "fn" : "⌥", pressed: controller.triggerHeld || controller.isRecording)
+                        KeyCap(label: prefs.trigger.cap, pressed: controller.triggerHeld || controller.isRecording)
                         Text("in any app and start talking.")
                     }
                     .font(.system(size: 14)).foregroundColor(.secondary)
@@ -401,7 +401,7 @@ private struct FirstDictationCard: View {
     var body: some View {
         Card {
             HStack(alignment: .center, spacing: 22) {
-                KeyCap(label: prefs.trigger == .fn ? "fn" : "⌥", pressed: controller.triggerHeld || controller.isRecording, large: true)
+                KeyCap(label: prefs.trigger.cap, pressed: controller.triggerHeld || controller.isRecording, large: true)
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Try your first dictation").font(.system(size: 16, weight: .semibold))
                     Text("Click the box, hold \(prefs.trigger.short), and say anything. Murmur removes the “ums”, fixes corrections and punctuates for you.")

@@ -18,6 +18,11 @@ final class AppController: ObservableObject {
     @Published private(set) var inFlight = 0
     @Published private(set) var hotkeyActive = false
     @Published private(set) var canRetry = false
+    struct DictationEvent: Equatable { let id = UUID(); let locked: Bool; let command: Bool }
+    /// The last dictation that finished successfully (drives the onboarding lessons).
+    @Published private(set) var lastDictation: DictationEvent?
+    /// Mirrors command mode of the current recording.
+    @Published private(set) var commandActive = false
     /// True while the dictation key is physically held (drives the practice key cap).
     @Published private(set) var triggerHeld = false
     var onStateChange: (() -> Void)?
@@ -32,7 +37,8 @@ final class AppController: ObservableObject {
         var fakeAudio: URL?
     }
 
-    private var session: Session?
+    private var session: Session? { didSet { sessionLocked = session?.locked ?? false } }
+    @Published private(set) var sessionLocked = false
     private var pendingTap: DispatchWorkItem?
     private var showWork: DispatchWorkItem?
     private var fakeTimer: Timer?
@@ -135,6 +141,7 @@ final class AppController: ObservableObject {
         guard var s = session, !s.command else { return }
         s.command = true
         session = s
+        commandActive = true
         hud.setCommand(true)
         hud.model.hint = (s.focus.selectedText ?? "").isEmpty ? "Command: say what to write" : "Command: say how to change the selection"
     }
@@ -211,6 +218,7 @@ final class AppController: ObservableObject {
         }
 
         session = Session(locked: locked, command: false, focus: focus, fakeAudio: fake)
+        commandActive = false
         isRecording = true
         onStateChange?()
         switch prefs.engine {
@@ -325,6 +333,7 @@ final class AppController: ObservableObject {
                                   mode: out.mode, engine: out.engine, audioSeconds: rec.duration, latency: latency,
                                   bundleID: s.focus.bundleID))
             try? FileManager.default.removeItem(at: url)
+            lastDictation = DictationEvent(locked: s.locked, command: s.command)
             lastFailure = nil
             canRetry = false
             if !isRecording {

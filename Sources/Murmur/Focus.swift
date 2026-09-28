@@ -21,6 +21,19 @@ struct FocusSnapshot {
         s.appName = app?.localizedName
         s.bundleID = app?.bundleIdentifier
         s.pid = app?.processIdentifier
+        // Murmur's own window: read the field directly (asking AX about ourselves can stall).
+        if s.pid == ProcessInfo.processInfo.processIdentifier {
+            if let tv = NSApp.keyWindow?.firstResponder as? NSTextView {
+                s.role = kAXTextAreaRole as String
+                let ns = tv.string as NSString
+                let r = tv.selectedRange()
+                if r.length > 0 { s.selectedText = ns.substring(with: r) }
+                let start = max(0, r.location - 600)
+                s.textBeforeCursor = ns.substring(with: NSRange(location: start, length: r.location - start))
+            }
+            s.windowTitle = NSApp.keyWindow?.title
+            return s
+        }
         guard AXIsProcessTrusted(), let pid = s.pid else { return s }
 
         let appEl = AXUIElementCreateApplication(pid)

@@ -135,7 +135,7 @@ struct GeneralPane: View {
                 Picker("Hold to talk", selection: $prefs.trigger) {
                     ForEach(TriggerKey.allCases) { Text($0.label).tag($0) }
                 }
-                ShortcutList(trigger: prefs.trigger.short).padding(.vertical, 6)
+                ShortcutList(trigger: prefs.trigger.cap).padding(.vertical, 6)
             } header: { Text("Dictation key") }
 
             Section {

@@ -5,7 +5,7 @@ import ApplicationServices
 
 @MainActor
 final class OnboardingModel: ObservableObject {
-    enum Step: Int, CaseIterable { case welcome, account, microphone, accessibility, globe, practice, done }
+    enum Step: Int, CaseIterable { case welcome, account, microphone, accessibility, globe, practice, handsfree, command, done }
 
     @Published var step: Step = .welcome
     @Published var forward = true
@@ -113,7 +113,9 @@ struct OnboardingView: View {
         case .microphone: MicrophoneStep(model: model)
         case .accessibility: AccessibilityStep(model: model)
         case .globe: KeyStep(model: model)
-        case .practice: PracticeStep(model: model)
+        case .practice: LessonStep(model: model, lesson: .hold)
+        case .handsfree: LessonStep(model: model, lesson: .handsfree)
+        case .command: LessonStep(model: model, lesson: .command)
         case .done: DoneStep(model: model)
         }
     }
@@ -428,7 +430,7 @@ private struct KeyStep: View {
     var body: some View {
         StepScaffold(title: "Pick your dictation key",
                      subtitle: "Hold it in any app to talk. Double-tap it for hands-free.") {
-            KeyCap(label: prefs.trigger == .fn ? "fn" : "⌥", large: true)
+            KeyCap(label: prefs.trigger.cap, large: true)
         } content: {
             HStack(spacing: 12) {
                 KeyOption(selected: prefs.trigger == .fn, key: "fn", title: "Globe key", detail: fnDetail, warn: fnUsage != 0) {
@@ -491,60 +493,165 @@ private struct KeyOption: View {
     }
 }
 
-private struct PracticeStep: View {
+/// A hands-on lesson: one gesture, a box to try it in, and a check when it worked.
+private struct LessonStep: View {
+    enum Lesson { case hold, handsfree, command }
+
     @ObservedObject var model: OnboardingModel
+    let lesson: Lesson
     @ObservedObject private var controller = AppController.shared
-    @ObservedObject private var history = HistoryStore.shared
     @ObservedObject private var prefs = Prefs.shared
     @State private var text = ""
-    @State private var startCount = HistoryStore.shared.items.count
+    @State private var done = false
+    @State private var startEvent: UUID?
     @FocusState private var focused: Bool
 
-    private var result: Dictation? { history.items.count > startCount ? history.items.first : nil }
+    private static let roughDraft = "hey can u send me the q3 report tmrw, thx"
+
+    private var title: String {
+        switch lesson {
+        case .hold: return done ? "That's Murmur" : "Hold to talk"
+        case .handsfree: return done ? "Hands-free, done" : "Talk hands-free"
+        case .command: return done ? "Rewritten" : "Rewrite with your voice"
+        }
+    }
+
+    private var subtitle: String {
+        let k = prefs.trigger.short
+        switch lesson {
+        case .hold:
+            return done ? "Fillers gone, corrections applied. It works like this in every app."
+                        : "Hold \(k), say “Let's meet at two, actually three”, and let go."
+        case .handsfree:
+            return done ? "Great for long messages. Press esc anytime to cancel."
+                        : "Double-tap \(k), talk without holding anything, then tap \(k) once to finish."
+        case .command:
+            return done ? "Select any text in any app and tell Murmur how to change it."
+                        : "The text below is selected. Hold \(k) and ⌃, then say “make this more professional”."
+        }
+    }
 
     var body: some View {
-        StepScaffold(title: result == nil ? "Give it a try" : "That's Murmur",
-                     subtitle: result == nil
-                        ? "Hold \(prefs.trigger.short) and say: “Um, let's meet at two, actually three, new line, thanks!”"
-                        : "Fillers gone, corrections applied, formatting done. It works like this in every app.") {
-            KeyCap(label: prefs.trigger == .fn ? "fn" : "⌥", pressed: controller.triggerHeld || controller.isRecording, large: true)
+        StepScaffold(title: title, subtitle: subtitle) {
+            LessonKeys(lesson: lesson, cap: prefs.trigger.cap,
+                       triggerDown: controller.triggerHeld,
+                       recording: controller.isRecording,
+                       locked: controller.sessionLocked,
+                       command: controller.commandActive,
+                       done: done)
         } content: {
-            VStack(spacing: 12) {
-                ZStack(alignment: .topLeading) {
-                    TextEditor(text: $text)
-                        .font(.system(size: 14))
-                        .scrollContentBackground(.hidden)
-                        .focused($focused)
-                        .padding(8)
-                    if text.isEmpty {
-                        Text("Your words appear here…").font(.system(size: 14)).foregroundColor(.secondary.opacity(0.7))
-                            .padding(.horizontal, 13).padding(.vertical, 8).allowsHitTesting(false)
-                    }
-                }
-                .frame(width: 440, height: 96)
-                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color(nsColor: .textBackgroundColor)))
-                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .strokeBorder(focused ? Brand.violet.opacity(0.6) : Color.primary.opacity(0.1), lineWidth: focused ? 1.5 : 1))
-                .animation(Brand.quick, value: focused)
-
-            }
-            .onChange(of: result?.id) { _ in
-                // Safety net: if the paste didn't land in the box, show the result anyway.
-                guard let r = result else { return }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-                    if !text.contains(r.text.trimmingCharacters(in: .whitespaces)) {
-                        text = text.isEmpty ? r.text.trimmingCharacters(in: .whitespaces) : text + " " + r.text.trimmingCharacters(in: .whitespaces)
-                    }
+            ZStack(alignment: .topLeading) {
+                TextEditor(text: $text)
+                    .font(.system(size: 14))
+                    .scrollContentBackground(.hidden)
+                    .focused($focused)
+                    .padding(8)
+                if text.isEmpty {
+                    Text("Your words appear here…").font(.system(size: 14)).foregroundColor(.secondary.opacity(0.7))
+                        .padding(.horizontal, 13).padding(.vertical, 8).allowsHitTesting(false)
                 }
             }
+            .frame(width: 440, height: 96)
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color(nsColor: .textBackgroundColor)))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(done ? Brand.success.opacity(0.7) : focused ? Brand.violet.opacity(0.6) : Color.primary.opacity(0.1),
+                              lineWidth: focused || done ? 1.5 : 1))
+            .animation(Brand.quick, value: focused)
+            .animation(Brand.spring, value: done)
         } actions: {
-            Button(result == nil ? "Skip for now" : "Continue") { model.next() }
-                .buttonStyle(result == nil ? AnyButtonStyle(SecondaryButtonStyle()) : AnyButtonStyle(PrimaryButtonStyle()))
+            Button(done ? "Continue" : "Skip") { model.next() }
+                .buttonStyle(done ? AnyButtonStyle(PrimaryButtonStyle()) : AnyButtonStyle(SecondaryButtonStyle()))
+                .keyboardShortcut(done ? .defaultAction : .cancelAction)
         }
         .onAppear {
-            startCount = history.items.count
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { focused = true }
+            startEvent = controller.lastDictation?.id
+            if lesson == .command { text = Self.roughDraft }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                focused = true
+                // Preselect the draft so the lesson is just "hold and speak".
+                if lesson == .command {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        (NSApp.keyWindow?.firstResponder as? NSTextView)?.selectAll(nil)
+                    }
+                }
+            }
         }
+        .onChange(of: controller.lastDictation) { event in
+            guard let event, event.id != startEvent else { return }
+            let passed: Bool
+            switch lesson {
+            case .hold: passed = !event.command
+            case .handsfree: passed = event.locked && !event.command
+            case .command: passed = event.command
+            }
+            if passed { withAnimation(Brand.spring) { done = true } }
+            // Safety net: if the paste didn't land in the box, show the result anyway.
+            if lesson == .command, passed, let r = HistoryStore.shared.items.first {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                    if text == Self.roughDraft { text = r.text.trimmingCharacters(in: .whitespaces) }
+                }
+            } else if lesson != .command, let r = HistoryStore.shared.items.first {
+                let t = r.text.trimmingCharacters(in: .whitespaces)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                    if !text.contains(t) { text = text.isEmpty ? t : text + " " + t }
+                }
+            }
+        }
+    }
+}
+
+/// The key (or keys) a lesson teaches, lighting up live as the user presses them.
+private struct LessonKeys: View {
+    let lesson: LessonStep.Lesson
+    let cap: String
+    let triggerDown: Bool
+    let recording: Bool
+    let locked: Bool
+    let command: Bool
+    let done: Bool
+
+    @State private var demoTap = false
+    @State private var timer: Timer?
+
+    var body: some View {
+        ZStack {
+            if done {
+                DrawnCheck(size: 76).shadow(color: Brand.success.opacity(0.35), radius: 16, y: 6).transition(.iconSwap)
+            } else {
+                HStack(spacing: 14) {
+                    switch lesson {
+                    case .hold:
+                        KeyCap(label: cap, pressed: triggerDown || recording, large: true)
+                    case .handsfree:
+                        KeyCap(label: cap, pressed: triggerDown || demoTap || locked, large: true)
+                        caption(locked ? "Listening, tap again to finish" : "tap tap")
+                    case .command:
+                        KeyCap(label: cap, pressed: triggerDown || recording, large: true)
+                        Text("+").font(.system(size: 22, weight: .medium)).foregroundColor(.secondary)
+                        KeyCap(label: "⌃", pressed: command, large: true)
+                    }
+                }
+                .transition(.iconSwap)
+            }
+        }
+        .frame(height: 90)
+        .animation(Brand.spring, value: done)
+        .onAppear {
+            guard lesson == .handsfree, !Brand.reduceMotion else { return }
+            // Demonstrates the double-tap rhythm until the user tries it.
+            timer = Timer.scheduledTimer(withTimeInterval: 2.2, repeats: true) { _ in
+                MainActor.assumeIsolated {
+                    for (i, on) in [true, false, true, false].enumerated() {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * 0.16) { demoTap = on }
+                    }
+                }
+            }
+        }
+        .onDisappear { timer?.invalidate() }
+    }
+
+    private func caption(_ s: String) -> some View {
+        Text(s).font(.system(size: 12, weight: .medium)).foregroundColor(.secondary).frame(width: 110, alignment: .leading)
     }
 }
 
@@ -555,16 +662,10 @@ private struct DoneStep: View {
 
     var body: some View {
         StepScaffold(title: "You're all set",
-                     subtitle: "Murmur lives in your menu bar. Hold \(prefs.trigger.short) in any app to start talking.") {
-            DrawnCheck(size: 76)
-                .shadow(color: Brand.success.opacity(0.35), radius: 16, y: 6)
+                     subtitle: "Hold \(prefs.trigger.short) in any app to start talking. Open Murmur from Spotlight anytime to see your history.") {
+            DrawnCheck(size: 76).shadow(color: Brand.success.opacity(0.35), radius: 16, y: 6)
         } content: {
-            VStack(alignment: .leading, spacing: 18) {
-                ShortcutList(trigger: prefs.trigger.short)
-                Toggle("Open Murmur when you log in", isOn: $launchAtLogin).toggleStyle(.switch).controlSize(.small)
-            }
-            .padding(18)
-            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color(nsColor: .controlBackgroundColor).opacity(0.7)))
+            Toggle("Open Murmur when you log in", isOn: $launchAtLogin).toggleStyle(.switch)
         } actions: {
             Button("Start using Murmur") {
                 if launchAtLogin { try? SMAppService.mainApp.register() }

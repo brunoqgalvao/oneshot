@@ -22,6 +22,15 @@ enum TriggerKey: String, CaseIterable, Identifiable {
         }
     }
 
+    /// Glyph for key caps.
+    var cap: String {
+        switch self {
+        case .fn: return "fn"
+        case .rightOption: return "⌥"
+        case .rightCommand: return "⌘"
+        }
+    }
+
     var keyCode: Int64 {
         switch self {
         case .fn: return 63
