@@ -1,12 +1,12 @@
 <p align="center"><img src="server/public/icon.png" width="96" alt="Oneshot"></p>
 <h1 align="center">Oneshot</h1>
 <p align="center"><b>Say it once.</b> Free, open-source voice dictation for Mac.</p>
-<p align="center"><a href="https://oneshot.fm">oneshot.fm</a> · <a href="https://github.com/brunoqgalvao/oneshot/releases/latest">Download</a></p>
+<p align="center"><a href="https://murmur-dictation.fly.dev">Website</a> · <a href="https://github.com/brunoqgalvao/oneshot/releases/latest">Download</a></p>
 
 Hold a key, talk like you normally talk, and clean, punctuated text lands wherever your cursor is: Slack, Gmail, Cursor, Notion, the terminal.
 
 ```sh
-curl -fsSL https://oneshot.fm/install.sh | sh
+curl -fsSL https://murmur-dictation.fly.dev/install.sh | sh
 ```
 
 ## What it does

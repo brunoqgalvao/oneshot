@@ -1,6 +1,6 @@
 #!/bin/sh
 # Installs the latest Oneshot into /Applications (or ~/Applications).
-#   curl -fsSL https://oneshot.fm/install.sh | sh
+#   curl -fsSL https://murmur-dictation.fly.dev/install.sh | sh
 set -e
 URL="https://github.com/brunoqgalvao/oneshot/releases/latest/download/Oneshot.zip"
 DEST="/Applications"
