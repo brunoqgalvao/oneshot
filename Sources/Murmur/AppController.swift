@@ -441,10 +441,11 @@ final class AppController: ObservableObject {
         if NSWorkspace.shared.frontmostApplication?.processIdentifier == ProcessInfo.processInfo.processIdentifier,
            let field = NSApp.keyWindow?.firstResponder as? NSTextView, field.isEditable {
             field.insertText(text, replacementRange: field.selectedRange())
+            if prefs.keepOnClipboard { Paster.copy(text) }
             return true
         }
         if AXIsProcessTrusted() {
-            Paster.paste(text, restoreClipboard: prefs.restoreClipboard)
+            Paster.paste(text, keepOnClipboard: prefs.keepOnClipboard)
             return true
         }
         Paster.copy(text)

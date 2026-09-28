@@ -158,7 +158,13 @@ struct GeneralPane: View {
             Section {
                 Toggle("Show the Murmur dot at the bottom of the screen", isOn: $prefs.showIndicator)
                 Toggle("Play sounds", isOn: $prefs.sounds)
-                Toggle("Restore clipboard after inserting", isOn: $prefs.restoreClipboard)
+                Toggle(isOn: $prefs.keepOnClipboard) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Keep the latest dictation on the clipboard")
+                        Text("Paste it again anywhere with ⌘V. Turn off to restore what you had copied before.")
+                            .font(.system(size: 11)).foregroundColor(.secondary)
+                    }
+                }
                 Toggle("Open at login", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { on in
                         do { if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() } }

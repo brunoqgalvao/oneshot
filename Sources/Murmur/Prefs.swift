@@ -76,7 +76,8 @@ final class Prefs: ObservableObject {
     @Published var language: String { didSet { d.set(language, forKey: "language") } }
     @Published var vocabulary: String { didSet { d.set(vocabulary, forKey: "vocabulary") } }
     @Published var sounds: Bool { didSet { d.set(sounds, forKey: "sounds") } }
-    @Published var restoreClipboard: Bool { didSet { d.set(restoreClipboard, forKey: "restoreClipboard") } }
+    /// Leave each dictation on the clipboard after inserting it (instead of restoring what was there).
+    @Published var keepOnClipboard: Bool { didSet { d.set(keepOnClipboard, forKey: "keepOnClipboard") } }
     @Published var offlineFallback: Bool { didSet { d.set(offlineFallback, forKey: "offlineFallback") } }
     @Published var showIndicator: Bool { didSet { d.set(showIndicator, forKey: "showIndicator") } }
     /// Empty string = system default input.
@@ -111,7 +112,7 @@ final class Prefs: ObservableObject {
             "language": "auto",
             "vocabulary": "",
             "sounds": true,
-            "restoreClipboard": true,
+            "keepOnClipboard": true,
             "offlineFallback": true,
             "showIndicator": true,
         ])
@@ -125,7 +126,7 @@ final class Prefs: ObservableObject {
         language = d.string(forKey: "language") ?? "auto"
         vocabulary = d.string(forKey: "vocabulary") ?? ""
         sounds = d.bool(forKey: "sounds")
-        restoreClipboard = d.bool(forKey: "restoreClipboard")
+        keepOnClipboard = d.bool(forKey: "keepOnClipboard")
         offlineFallback = d.bool(forKey: "offlineFallback")
         inputDeviceUID = d.string(forKey: "inputDeviceUID") ?? ""
         showIndicator = d.bool(forKey: "showIndicator")
