@@ -114,6 +114,8 @@ private final class HUDPanel: NSPanel {
 /// text still lands in the app the user was typing in.
 final class HUD {
     let model = HUDModel()
+    /// Called with true when the HUD appears and false once it's gone.
+    var onVisibilityChange: ((Bool) -> Void)?
     private lazy var panel: HUDPanel = {
         let p = HUDPanel()
         let host = NSHostingView(rootView: HUDView(model: model))
@@ -128,6 +130,7 @@ final class HUD {
         dismissToken += 1
         let token = dismissToken
         if model.phase.isHidden { position() }
+        onVisibilityChange?(true)
         panel.orderFrontRegardless()
         withAnimation(Brand.spring) { model.phase = phase }
         updateMouse()
@@ -156,6 +159,7 @@ final class HUD {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
             guard let self, self.dismissToken == token else { return }
             self.panel.orderOut(nil)
+            self.onVisibilityChange?(false)
         }
     }
 

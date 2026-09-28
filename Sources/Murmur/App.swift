@@ -41,6 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let settings = SettingsWindowController()
     private let onboarding = OnboardingWindowController()
     private let main = MainWindowController()
+    private let indicator = IdleIndicator()
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         AppDelegate.shared = self
@@ -62,6 +63,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         onboarding.model.onFinish = { [weak self] in self?.finishOnboarding() }
         controller.start()
         Task { await Account.shared.refresh(); self.statusMenu?.refresh() }
+
+        indicator.onClick = { [weak self] in
+            guard let self else { return }
+            if self.indicator.model.needsSetup { self.showOnboarding(step: nil) } else { self.controller.toggle() }
+        }
+        indicator.onOpen = { [weak self] in self?.showMain(.home) }
+        indicator.onSettings = { [weak self] in self?.showSettings(tab: "general") }
+        controller.hud.onVisibilityChange = { [weak self] visible in self?.indicator.setSuppressed(visible) }
+        indicator.install()
 
         let prefs = Prefs.shared
         let needsSetup = !AXIsProcessTrusted() || AudioRecorder.permission != .authorized
@@ -174,6 +184,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             showMain(path.count > 1 ? MainNav.Page(rawValue: path[1]) : .home, activate: !quiet)
         case "close-settings": settings.close(); onboarding.close(); main.close()
         case "open-menu": statusMenu?.showBriefly(seconds: Double(path.count > 1 ? path[1] : "3") ?? 3)
+        case "demo" where path.count > 1 && path[1] == "idle-hover":
+            withAnimation(Brand.spring) { indicator.model.hover = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { withAnimation(Brand.spring) { self.indicator.model.hover = false } }
         case "demo": Demo.show(path.count > 1 ? path[1] : "listening", hud: controller.hud)
         default: break
         }

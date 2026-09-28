@@ -156,6 +156,7 @@ struct GeneralPane: View {
             } header: { Text("Input") }
 
             Section {
+                Toggle("Show the Murmur dot at the bottom of the screen", isOn: $prefs.showIndicator)
                 Toggle("Play sounds", isOn: $prefs.sounds)
                 Toggle("Restore clipboard after inserting", isOn: $prefs.restoreClipboard)
                 Toggle("Open at login", isOn: $launchAtLogin)

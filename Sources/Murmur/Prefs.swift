@@ -78,6 +78,7 @@ final class Prefs: ObservableObject {
     @Published var sounds: Bool { didSet { d.set(sounds, forKey: "sounds") } }
     @Published var restoreClipboard: Bool { didSet { d.set(restoreClipboard, forKey: "restoreClipboard") } }
     @Published var offlineFallback: Bool { didSet { d.set(offlineFallback, forKey: "offlineFallback") } }
+    @Published var showIndicator: Bool { didSet { d.set(showIndicator, forKey: "showIndicator") } }
     /// Empty string = system default input.
     @Published var inputDeviceUID: String { didSet { d.set(inputDeviceUID, forKey: "inputDeviceUID") } }
     var onboarded: Bool {
@@ -112,6 +113,7 @@ final class Prefs: ObservableObject {
             "sounds": true,
             "restoreClipboard": true,
             "offlineFallback": true,
+            "showIndicator": true,
         ])
         trigger = TriggerKey(rawValue: d.string(forKey: "trigger") ?? "") ?? .fn
         engine = Engine(rawValue: d.string(forKey: "engine") ?? "") ?? .cloud
@@ -126,6 +128,7 @@ final class Prefs: ObservableObject {
         restoreClipboard = d.bool(forKey: "restoreClipboard")
         offlineFallback = d.bool(forKey: "offlineFallback")
         inputDeviceUID = d.string(forKey: "inputDeviceUID") ?? ""
+        showIndicator = d.bool(forKey: "showIndicator")
         apiKey = Secrets.loadOpenAIKey() ?? ""
     }
 
