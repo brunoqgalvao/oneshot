@@ -1,6 +1,58 @@
 import AppKit
 import SwiftUI
 
+/// Audio levels for the waveform. Kept out of SwiftUI state on purpose: the
+/// waveform redraws every display frame and reads this directly, so updates at
+/// ~40 Hz never trigger view diffing.
+final class LevelMeter {
+    static let bars = 25
+    private let half = LevelMeter.bars / 2 + 1
+    private var history: [CGFloat]
+    private(set) var shown: [CGFloat]
+    private var lastT: Double = 0
+
+    init() {
+        history = Array(repeating: 0, count: half)
+        shown = Array(repeating: 0, count: Self.bars)
+    }
+
+    func push(_ level: CGFloat) {
+        // Noise gate: room tone stays flat, speech moves the bars.
+        let gated = level < 0.07 ? 0 : min(1, (level - 0.07) / 0.93)
+        history.removeLast()
+        history.insert(gated, at: 0)
+    }
+
+    func reset() {
+        history = Array(repeating: 0, count: half)
+    }
+
+    enum Mode { case live, thinking }
+
+    /// Moves displayed heights toward their targets. Called once per frame.
+    func advance(to t: Double, mode: Mode) {
+        let dt = lastT == 0 ? 1.0 / 60 : min(0.05, max(0.001, t - lastT))
+        lastT = t
+        let c = Self.bars / 2
+        for i in 0..<Self.bars {
+            let d = abs(i - c)
+            let target: CGFloat
+            switch mode {
+            case .live:
+                // Newest level in the middle, older levels ripple outward.
+                let envelope = 1 - CGFloat(d) / CGFloat(c + 3)
+                target = history[min(d, history.count - 1)] * envelope
+            case .thinking:
+                let wave = (sin(t * 5.2 - Double(i) * 0.5) + 1) / 2
+                target = 0.12 + 0.3 * CGFloat(wave)
+            }
+            let rising = target > shown[i]
+            let rate: Double = rising ? 28 : 9   // fast attack, slow release
+            shown[i] += (target - shown[i]) * CGFloat(1 - exp(-rate * dt))
+        }
+    }
+}
+
 final class HUDModel: ObservableObject {
     enum Phase: Equatable {
         case hidden
@@ -9,34 +61,39 @@ final class HUDModel: ObservableObject {
         case done(String)
         case error(String)
         case notice(String)
+
+        var isHidden: Bool { self == .hidden }
+        var kind: Int {
+            switch self {
+            case .hidden: return 0
+            case .listening: return 1
+            case .processing: return 2
+            case .done: return 3
+            case .error: return 4
+            case .notice: return 5
+            }
+        }
     }
 
-    static let barCount = 28
     @Published var phase: Phase = .hidden
-    @Published var levels: [CGFloat] = Array(repeating: 0, count: HUDModel.barCount)
     @Published var locked = false
     @Published var command = false
+    @Published var canRetry = false
     @Published var startedAt = Date()
     @Published var hint: String?
+    let meter = LevelMeter()
 
     var onStop: (() -> Void)?
     var onCancel: (() -> Void)?
+    var onRetry: (() -> Void)?
 
-    func push(level: CGFloat) {
-        var l = levels
-        l.removeFirst()
-        // Ease toward the new value so bars feel alive but not jittery.
-        let prev = l.last ?? 0
-        l.append(prev * 0.25 + level * 0.75)
-        levels = l
-    }
-
-    func resetLevels() { levels = Array(repeating: 0, count: Self.barCount) }
+    func push(level: CGFloat) { meter.push(level) }
+    func resetLevels() { meter.reset() }
 }
 
 private final class HUDPanel: NSPanel {
     init() {
-        super.init(contentRect: NSRect(x: 0, y: 0, width: 460, height: 120),
+        super.init(contentRect: NSRect(x: 0, y: 0, width: 520, height: 132),
                    styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         isFloatingPanel = true
         level = .statusBar
@@ -70,10 +127,10 @@ final class HUD {
     func show(_ phase: HUDModel.Phase, autoHideAfter: Double? = nil) {
         dismissToken += 1
         let token = dismissToken
-        position()
+        if model.phase.isHidden { position() }
         panel.orderFrontRegardless()
-        withAnimation(.spring(response: 0.32, dampingFraction: 0.8)) { model.phase = phase }
-        panel.ignoresMouseEvents = !(phase == .listening && model.locked)
+        withAnimation(Brand.spring) { model.phase = phase }
+        updateMouse()
         if let delay = autoHideAfter {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 guard let self, self.dismissToken == token else { return }
@@ -83,18 +140,18 @@ final class HUD {
     }
 
     func setLocked(_ locked: Bool) {
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { model.locked = locked }
-        panel.ignoresMouseEvents = !(model.phase == .listening && locked)
+        withAnimation(Brand.spring) { model.locked = locked }
+        updateMouse()
     }
 
     func setCommand(_ on: Bool) {
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { model.command = on }
+        withAnimation(Brand.spring) { model.command = on }
     }
 
     func hide() {
         dismissToken += 1
         let token = dismissToken
-        withAnimation(.easeIn(duration: 0.18)) { model.phase = .hidden }
+        withAnimation(.easeIn(duration: 0.16)) { model.phase = .hidden }
         panel.ignoresMouseEvents = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
             guard let self, self.dismissToken == token else { return }
@@ -102,14 +159,24 @@ final class HUD {
         }
     }
 
-    var isVisible: Bool { model.phase != .hidden }
+    var isVisible: Bool { !model.phase.isHidden }
+
+    private func updateMouse() {
+        let interactive: Bool
+        switch model.phase {
+        case .listening: interactive = model.locked
+        case .error: interactive = model.canRetry
+        default: interactive = false
+        }
+        panel.ignoresMouseEvents = !interactive
+    }
 
     private func position() {
         let mouse = NSEvent.mouseLocation
         let screen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? NSScreen.main
         guard let vf = screen?.visibleFrame else { return }
         let size = panel.frame.size
-        panel.setFrameOrigin(NSPoint(x: vf.midX - size.width / 2, y: vf.minY + 6))
+        panel.setFrameOrigin(NSPoint(x: vf.midX - size.width / 2, y: vf.minY + 4))
     }
 }
 
@@ -119,134 +186,198 @@ struct HUDView: View {
     @ObservedObject var model: HUDModel
 
     var body: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 8) {
             Spacer(minLength: 0)
-            if model.phase != .hidden {
-                VStack(spacing: 6) {
-                    if model.phase == .listening, let hint = model.hint {
-                        Text(hint)
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(.white.opacity(0.85))
-                            .padding(.horizontal, 10).padding(.vertical, 4)
-                            .background(Capsule().fill(Color.black.opacity(0.55)))
-                            .transition(.opacity)
-                    }
-                    pill
-                }
-                .transition(.asymmetric(
-                    insertion: .scale(scale: 0.5, anchor: .bottom).combined(with: .opacity),
-                    removal: .scale(scale: 0.8, anchor: .bottom).combined(with: .opacity)))
+            if model.phase == .listening, let hint = model.hint {
+                Text(hint)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.white.opacity(0.88))
+                    .padding(.horizontal, 12).padding(.vertical, 6)
+                    .background(Capsule().fill(.ultraThinMaterial))
+                    .background(Capsule().fill(Color.black.opacity(0.45)))
+                    .shadow(color: .black.opacity(0.25), radius: 8, y: 3)
+                    .transition(.asymmetric(
+                        insertion: .opacity.combined(with: .offset(y: 6)).animation(Brand.spring.delay(0.12)),
+                        removal: .opacity.animation(.easeIn(duration: 0.12))))
+            }
+            if !model.phase.isHidden {
+                Pill(model: model)
+                    .transition(.asymmetric(
+                        insertion: Brand.reduceMotion ? .opacity : .modifier(active: PillEnter(on: false), identity: PillEnter(on: true)),
+                        removal: .modifier(active: PillExit(on: true), identity: PillExit(on: false))))
             }
         }
-        .frame(width: 460, height: 120, alignment: .bottom)
-        .padding(.bottom, 10)
+        .frame(width: 520, height: 132, alignment: .bottom)
+        .padding(.bottom, 12)
+        .environment(\.colorScheme, .dark)
     }
+}
 
-    private var pill: some View {
-        HStack(spacing: 10) { content }
-            .padding(.horizontal, model.phase == .listening && model.locked ? 6 : 14)
-            .frame(height: 38)
-            .background(
-                Capsule()
-                    .fill(Color(white: 0.07).opacity(0.94))
-                    .overlay(Capsule().strokeBorder(borderColor, lineWidth: 1))
-            )
-            .shadow(color: .black.opacity(0.35), radius: 14, y: 5)
-            .fixedSize()
+private struct PillEnter: ViewModifier {
+    let on: Bool
+    func body(content: Content) -> some View {
+        content.scaleEffect(on ? 1 : 0.86, anchor: .bottom).opacity(on ? 1 : 0).offset(y: on ? 0 : 10).blur(radius: on ? 0 : 4)
     }
+}
 
-    private var borderColor: Color {
-        if model.command && (model.phase == .listening || model.phase == .processing) {
-            return Color(red: 0.62, green: 0.5, blue: 1).opacity(0.7)
+private struct PillExit: ViewModifier {
+    let on: Bool
+    func body(content: Content) -> some View {
+        content.scaleEffect(on ? 0.97 : 1, anchor: .bottom).opacity(on ? 0 : 1).offset(y: on ? 6 : 0)
+    }
+}
+
+struct Pill: View {
+    @ObservedObject var model: HUDModel
+
+    private var showsWave: Bool { model.phase == .listening || model.phase == .processing }
+    private var tint: Color { model.command ? Brand.commandTint : .white }
+    private var layoutKey: String { "\(model.phase.kind)-\(model.locked)-\(model.command)-\(model.canRetry)" }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            leading
+            if showsWave {
+                LiveWaveform(meter: model.meter, mode: model.phase == .processing ? .thinking : .live, tint: tint)
+                    .transition(.opacity.combined(with: .scale(scale: 0.6)))
+            }
+            trailing
         }
-        return .white.opacity(0.13)
+        .padding(.leading, leadingPad)
+        .padding(.trailing, trailingPad)
+        .frame(height: 40)
+        .background(PillBackground(command: model.command && showsWave))
+        .fixedSize()
+        .animation(Brand.spring, value: layoutKey)
     }
 
-    @ViewBuilder private var content: some View {
+    private var leadingPad: CGFloat { model.phase == .listening && model.locked ? 6 : 14 }
+    private var trailingPad: CGFloat {
+        if model.phase == .listening && model.locked { return 6 }
+        if case .error = model.phase, model.canRetry { return 6 }
+        return 16
+    }
+
+    @ViewBuilder private var leading: some View {
         switch model.phase {
-        case .hidden:
-            EmptyView()
         case .listening:
             if model.locked {
-                RoundButton(symbol: "xmark", fg: .white.opacity(0.85), bg: .white.opacity(0.14)) { model.onCancel?() }
-                    .help("Cancel (Esc)")
-            }
-            if model.command {
-                Image(systemName: "sparkles").font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(Color(red: 0.72, green: 0.62, blue: 1))
-            } else if !model.locked {
-                PulsingDot()
-            }
-            Waveform(levels: model.levels, tint: model.command ? Color(red: 0.8, green: 0.74, blue: 1) : .white)
-            if model.locked {
-                ElapsedLabel(since: model.startedAt)
-                RoundButton(symbol: "stop.fill", fg: .white, bg: Color(red: 0.95, green: 0.25, blue: 0.3)) { model.onStop?() }
-                    .help("Finish")
+                HUDButton(symbol: "xmark", fg: .white.opacity(0.9), bg: .white.opacity(0.14), help: "Cancel (esc)") { model.onCancel?() }
+                    .transition(.iconSwap)
+            } else if model.command {
+                Image(systemName: "sparkles").font(.system(size: 13, weight: .semibold)).foregroundColor(Brand.commandTint)
+                    .transition(.iconSwap)
+            } else {
+                RecordingDot().transition(.iconSwap)
             }
         case .processing:
-            ThinkingBars(tint: model.command ? Color(red: 0.8, green: 0.74, blue: 1) : .white)
             if model.command {
-                Text("Rewriting").font(.system(size: 12, weight: .medium)).foregroundColor(.white.opacity(0.8))
+                Image(systemName: "sparkles").font(.system(size: 13, weight: .semibold)).foregroundColor(Brand.commandTint)
+                    .transition(.iconSwap)
             }
-        case .done(let msg):
-            Image(systemName: "checkmark.circle.fill").foregroundColor(Color(red: 0.3, green: 0.85, blue: 0.5))
-                .font(.system(size: 15, weight: .semibold))
-            Text(msg).font(.system(size: 12.5, weight: .medium)).foregroundColor(.white.opacity(0.92))
+        case .done:
+            DrawnCheck(size: 18).transition(.iconSwap)
+        case .error:
+            Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 13)).foregroundColor(.orange)
+                .transition(.iconSwap)
+        case .notice:
+            Image(systemName: "info.circle.fill").font(.system(size: 14)).foregroundColor(.white.opacity(0.75))
+                .transition(.iconSwap)
+        case .hidden:
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder private var trailing: some View {
+        switch model.phase {
+        case .listening where model.locked:
+            ElapsedLabel(since: model.startedAt).transition(.opacity)
+            HUDButton(symbol: "stop.fill", fg: .white, bg: Brand.recordRed, help: "Finish (\(Prefs.shared.trigger.short))") { model.onStop?() }
+                .transition(.iconSwap)
+        case .processing where model.command:
+            Text("Rewriting").font(.system(size: 12, weight: .medium)).foregroundColor(.white.opacity(0.8)).transition(.opacity)
+        case .done(let msg), .notice(let msg):
+            Text(msg).font(.system(size: 12.5, weight: .medium).monospacedDigit()).foregroundColor(.white.opacity(0.94))
+                .transition(.opacity)
         case .error(let msg):
-            Image(systemName: "exclamationmark.triangle.fill").foregroundColor(.orange).font(.system(size: 14))
-            Text(msg).font(.system(size: 12.5, weight: .medium)).foregroundColor(.white.opacity(0.92)).lineLimit(2)
-                .frame(maxWidth: 360)
-        case .notice(let msg):
-            Image(systemName: "info.circle.fill").foregroundColor(.white.opacity(0.7)).font(.system(size: 14))
-            Text(msg).font(.system(size: 12.5, weight: .medium)).foregroundColor(.white.opacity(0.92))
+            Text(msg).font(.system(size: 12.5, weight: .medium)).foregroundColor(.white.opacity(0.94))
+                .lineLimit(2).frame(maxWidth: 330, alignment: .leading).fixedSize(horizontal: false, vertical: true)
+                .transition(.opacity)
+            if model.canRetry {
+                Button { model.onRetry?() } label: {
+                    Text("Retry").font(.system(size: 12, weight: .semibold)).foregroundColor(.white)
+                        .padding(.horizontal, 12).frame(height: 28)
+                        .background(Capsule().fill(Color.white.opacity(0.16)))
+                        .contentShape(Capsule().inset(by: -6))
+                }
+                .buttonStyle(PressableStyle())
+                .transition(.iconSwap)
+            }
+        default:
+            EmptyView()
         }
     }
 }
 
-private struct Waveform: View {
-    let levels: [CGFloat]
-    let tint: Color
+private struct PillBackground: View {
+    let command: Bool
     var body: some View {
-        HStack(alignment: .center, spacing: 2.5) {
-            ForEach(levels.indices, id: \.self) { i in
-                // Fade the oldest bars so the waveform feels like it scrolls in.
-                let fade = 0.35 + 0.65 * Double(i) / Double(max(1, levels.count - 1))
-                Capsule()
-                    .fill(tint.opacity(fade))
-                    .frame(width: 2.5, height: max(3, min(22, 3 + levels[i] * 22)))
+        ZStack {
+            Capsule().fill(.ultraThinMaterial)
+            Capsule().fill(Color(white: 0.05).opacity(0.82))
+            // Lit top edge instead of a flat border.
+            Capsule().strokeBorder(
+                LinearGradient(colors: [.white.opacity(0.2), .white.opacity(0.05)], startPoint: .top, endPoint: .bottom),
+                lineWidth: 1)
+            if command {
+                Capsule().strokeBorder(Brand.violet.opacity(0.75), lineWidth: 1.2)
+                    .shadow(color: Brand.violet.opacity(0.6), radius: 8)
+                    .transition(.opacity)
             }
         }
-        .frame(height: 24)
-        .animation(.easeOut(duration: 0.08), value: levels)
+        .shadow(color: .black.opacity(0.22), radius: 1, y: 1)
+        .shadow(color: .black.opacity(0.32), radius: 18, y: 8)
     }
 }
 
-private struct ThinkingBars: View {
+struct LiveWaveform: View {
+    let meter: LevelMeter
+    let mode: LevelMeter.Mode
     let tint: Color
+    private let barWidth: CGFloat = 3
+    private let gap: CGFloat = 2.6
+
     var body: some View {
+        let n = LevelMeter.bars
         TimelineView(.animation) { ctx in
-            let t = ctx.date.timeIntervalSinceReferenceDate
-            HStack(spacing: 2.5) {
-                ForEach(0..<14, id: \.self) { i in
-                    let phase = sin(t * 6.5 - Double(i) * 0.45)
-                    Capsule()
-                        .fill(tint.opacity(0.45 + 0.4 * (phase + 1) / 2))
-                        .frame(width: 2.5, height: 4 + 9 * (phase + 1) / 2)
+            Canvas { g, size in
+                meter.advance(to: ctx.date.timeIntervalSinceReferenceDate, mode: mode)
+                let c = CGFloat(n - 1) / 2
+                for i in 0..<n {
+                    let h = max(barWidth, min(size.height, barWidth + meter.shown[i] * (size.height - barWidth)))
+                    let x = CGFloat(i) * (barWidth + gap)
+                    let rect = CGRect(x: x, y: (size.height - h) / 2, width: barWidth, height: h)
+                    let edge = 1 - pow(abs(CGFloat(i) - c) / c, 2) * 0.55
+                    g.fill(Path(roundedRect: rect, cornerRadius: barWidth / 2), with: .color(tint.opacity(Double(edge))))
                 }
             }
-            .frame(height: 24)
         }
+        .frame(width: CGFloat(n) * (barWidth + gap) - gap, height: 22)
     }
 }
 
-private struct PulsingDot: View {
+private struct RecordingDot: View {
     @State private var on = false
     var body: some View {
-        Circle()
-            .fill(Color(red: 1, green: 0.27, blue: 0.3))
-            .frame(width: 7, height: 7)
-            .opacity(on ? 1 : 0.35)
-            .onAppear { withAnimation(.easeInOut(duration: 0.7).repeatForever()) { on = true } }
+        ZStack {
+            Circle().fill(Brand.recordRed.opacity(0.35)).frame(width: 14, height: 14).scaleEffect(on ? 1 : 0.5).opacity(on ? 0 : 1)
+            Circle().fill(Brand.recordRed).frame(width: 7, height: 7)
+        }
+        .frame(width: 14, height: 14)
+        .onAppear {
+            guard !Brand.reduceMotion else { return }
+            withAnimation(.easeOut(duration: 1.2).repeatForever(autoreverses: false)) { on = true }
+        }
     }
 }
 
@@ -254,18 +385,19 @@ private struct ElapsedLabel: View {
     let since: Date
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { ctx in
-            let s = Int(ctx.date.timeIntervalSince(since))
+            let s = max(0, Int(ctx.date.timeIntervalSince(since)))
             Text(String(format: "%d:%02d", s / 60, s % 60))
                 .font(.system(size: 12, weight: .medium).monospacedDigit())
-                .foregroundColor(.white.opacity(0.75))
+                .foregroundColor(.white.opacity(0.72))
         }
     }
 }
 
-private struct RoundButton: View {
+private struct HUDButton: View {
     let symbol: String
     let fg: Color
     let bg: Color
+    let help: String
     let action: () -> Void
     @State private var hover = false
     var body: some View {
@@ -273,10 +405,12 @@ private struct RoundButton: View {
             Image(systemName: symbol)
                 .font(.system(size: 10, weight: .bold))
                 .foregroundColor(fg)
-                .frame(width: 26, height: 26)
+                .frame(width: 28, height: 28)
                 .background(Circle().fill(bg).brightness(hover ? 0.08 : 0))
+                .contentShape(Circle().inset(by: -6))  // ~40pt hit area
         }
-        .buttonStyle(.plain)
-        .onHover { hover = $0 }
+        .buttonStyle(PressableStyle())
+        .onHover { h in withAnimation(Brand.quick) { hover = h } }
+        .help(help)
     }
 }

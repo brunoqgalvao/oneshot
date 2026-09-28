@@ -69,6 +69,12 @@ final class Prefs: ObservableObject {
     @Published var sounds: Bool { didSet { d.set(sounds, forKey: "sounds") } }
     @Published var restoreClipboard: Bool { didSet { d.set(restoreClipboard, forKey: "restoreClipboard") } }
     @Published var offlineFallback: Bool { didSet { d.set(offlineFallback, forKey: "offlineFallback") } }
+    /// Empty string = system default input.
+    @Published var inputDeviceUID: String { didSet { d.set(inputDeviceUID, forKey: "inputDeviceUID") } }
+    var onboarded: Bool {
+        get { d.bool(forKey: "onboarded") }
+        set { d.set(newValue, forKey: "onboarded") }
+    }
     @Published var apiKey: String { didSet { Secrets.saveOpenAIKey(apiKey) } }
 
     /// Debug/testing: when set, recordings use this audio file instead of the microphone.
@@ -110,6 +116,7 @@ final class Prefs: ObservableObject {
         sounds = d.bool(forKey: "sounds")
         restoreClipboard = d.bool(forKey: "restoreClipboard")
         offlineFallback = d.bool(forKey: "offlineFallback")
+        inputDeviceUID = d.string(forKey: "inputDeviceUID") ?? ""
         apiKey = Secrets.loadOpenAIKey() ?? ""
     }
 

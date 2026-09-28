@@ -34,13 +34,15 @@ enum Main {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    static weak var shared: AppDelegate?
     private let controller = AppController.shared
     private var statusMenu: StatusMenu?
-    private var settingsWindow: NSWindow?
-    private let settingsState = SettingsState()
+    private let settings = SettingsWindowController()
+    private let onboarding = OnboardingWindowController()
 
     func applicationWillFinishLaunching(_ notification: Notification) {
+        AppDelegate.shared = self
         NSAppleEventManager.shared().setEventHandler(self, andSelector: #selector(handleURL(_:reply:)),
                                                      forEventClass: AEEventClass(kInternetEventClass), andEventID: AEEventID(kAEGetURL))
     }
@@ -52,7 +54,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         statusMenu = StatusMenu(controller: controller)
         controller.onStateChange = { [weak self] in self?.statusMenu?.refresh() }
-        controller.openSettings = { [weak self] tab in self?.showSettings(tab: tab) }
+        controller.openSettings = { [weak self] tab in
+            if tab == "setup" { self?.showOnboarding(step: nil) } else { self?.showSettings(tab: tab) }
+        }
+        onboarding.model.onFinish = { [weak self] in self?.finishOnboarding() }
         controller.start()
         Task { await Account.shared.refresh(); self.statusMenu?.refresh() }
 
@@ -60,46 +65,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let needsSetup = !AXIsProcessTrusted() || AudioRecorder.permission != .authorized
             || (prefs.engine == .openAI && prefs.effectiveAPIKey == nil)
             || (prefs.engine == .cloud && !Account.shared.isSignedIn)
-        if needsSetup { showSettings(tab: "setup") }
+        if !prefs.onboarded || needsSetup { showOnboarding(step: prefs.onboarded ? nil : .welcome) }
     }
 
-    /// `activate: false` shows the window without taking focus (used for screenshots).
-    func showSettings(tab: String?, activate: Bool = true) {
-        if let tab { settingsState.tab = tab }
-        if settingsWindow == nil {
-            let host = NSHostingController(rootView: SettingsView(state: settingsState))
-            let w = NSWindow(contentViewController: host)
-            w.title = "Murmur"
-            w.styleMask = [.titled, .closable, .miniaturizable]
-            w.isReleasedWhenClosed = false
-            w.delegate = self
-            w.center()
-            settingsWindow = w
+    /// Opening Murmur again (Spotlight, Finder, Launchpad) shows Settings. This is
+    /// the way back in when a crowded menu bar hides the status icon behind the notch.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag { showSettings(tab: "general") }
+        return true
+    }
+
+    func showOnboarding(step: OnboardingModel.Step?, activate: Bool = true) {
+        if let step {
+            onboarding.show(step: step, activate: activate)
+        } else {
+            // Jump to the first step that still needs attention.
+            let m = onboarding.model
+            let first = OnboardingModel.Step.allCases.dropFirst().first { s in
+                [.account, .microphone, .accessibility].contains(s) && !m.isSatisfied(s)
+            } ?? .welcome
+            onboarding.show(step: first, activate: activate)
         }
-        guard activate else { settingsWindow?.orderFrontRegardless(); return }
-        NSApp.setActivationPolicy(.regular)   // show in Dock + ⌘Tab while settings are open
-        NSApp.activate(ignoringOtherApps: true)
-        settingsWindow?.makeKeyAndOrderFront(nil)
     }
 
-    func windowWillClose(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
+    private func finishOnboarding() {
+        onboarding.close()
+        controller.hud.show(.notice("Murmur is in your menu bar. Hold \(Prefs.shared.trigger.short) anywhere."), autoHideAfter: 3.5)
+    }
+
+    func showSettings(tab: String?, activate: Bool = true) {
+        settings.show(SettingsWindowController.Pane.from(tab) ?? .general, activate: activate)
     }
 
     @objc private func handleURL(_ event: NSAppleEventDescriptor, reply: NSAppleEventDescriptor) {
         guard let s = event.paramDescriptor(forKeyword: keyDirectObject)?.stringValue, let url = URL(string: s) else { return }
         let path = ([url.host ?? ""] + url.pathComponents.filter { $0 != "/" }).filter { !$0.isEmpty }
+        let quiet = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.contains { $0.name == "quiet" } ?? false
         switch path.first {
         case "toggle": controller.toggle()
         case "start": if !controller.isRecording { controller.toggle() }
         case "stop": if controller.isRecording { controller.finish() }
         case "cancel": controller.cancelIfRecording()
         case "command": controller.startCommand()
-        case "settings", "setup":
-            let quiet = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.contains { $0.name == "quiet" } ?? false
-            let tab = path.first == "setup" ? "setup" : (path.count > 1 ? path[1] : "general")
-            showSettings(tab: tab, activate: !quiet)
-        case "close-settings": settingsWindow?.close()
+        case "settings": showSettings(tab: path.count > 1 ? path[1] : "general", activate: !quiet)
+        case "setup", "onboarding":
+            let step = path.count > 1 ? OnboardingModel.Step.allCases.first { "\($0)" == path[1] } : nil
+            showOnboarding(step: step ?? .welcome, activate: !quiet)
+        case "close-settings": settings.close(); onboarding.close()
+        case "open-menu": statusMenu?.showBriefly(seconds: Double(path.count > 1 ? path[1] : "3") ?? 3)
         case "demo": Demo.show(path.count > 1 ? path[1] : "listening", hud: controller.hud)
         default: break
         }
@@ -115,23 +128,24 @@ enum Demo {
         let m = hud.model
         m.command = state == "command" || state == "command-processing"
         m.locked = state == "locked"
+        m.canRetry = state == "error"
         m.startedAt = Date().addingTimeInterval(-7)
-        m.hint = state == "hint" ? "Release to insert · Space for hands-free · ⌃ for command · Esc cancels" : nil
-        var t = 0.0
-        for _ in 0..<HUDModel.barCount { t += 0.08; m.push(level: CGFloat(abs(sin(t * 9)) * (0.5 + 0.5 * sin(t * 1.3)))) }
+        m.hint = state == "hint" ? "Release to insert · Space for hands-free · ⌃ for command · esc cancels" : nil
+        let start = Date()
+        let feed = {
+            let t = Date().timeIntervalSince(start)
+            let v = CGFloat(abs(sin(t * 9)) * (0.55 + 0.45 * sin(t * 1.7)))
+            m.push(level: 0.2 + 0.8 * v)
+        }
         switch state {
         case "processing", "command-processing": hud.show(.processing, autoHideAfter: 6)
         case "done": hud.show(.done("23 words · 1.2s"), autoHideAfter: 6)
-        case "error": hud.show(.error("You're offline — Retry from the menu"), autoHideAfter: 6)
+        case "error": hud.show(.error("Can't reach the Murmur server"), autoHideAfter: 6)
+        case "notice": hud.show(.notice("Didn't catch that"), autoHideAfter: 6)
         case "hide": hud.hide()
         default:
             hud.show(.listening, autoHideAfter: 6)
-            let start = Date().addingTimeInterval(-t)
-            timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { _ in
-                let tt = Date().timeIntervalSince(start)
-                let v = CGFloat(abs(sin(tt * 9)) * (0.5 + 0.5 * sin(tt * 1.3)))
-                MainActor.assumeIsolated { m.push(level: v) }
-            }
+            timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 40, repeats: true) { _ in MainActor.assumeIsolated { feed() } }
             DispatchQueue.main.asyncAfter(deadline: .now() + 6) { timer?.invalidate() }
         }
     }

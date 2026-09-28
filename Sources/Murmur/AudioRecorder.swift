@@ -116,6 +116,8 @@ final class AudioRecorder {
         // A fresh engine picks up device changes (AirPods connecting, etc.).
         engine = AVAudioEngine()
         let input = engine.inputNode
+        let uid = Prefs.shared.inputDeviceUID
+        if !uid.isEmpty, let unit = input.audioUnit { AudioDevices.select(uid: uid, on: unit) }
         let format = input.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else { throw MurmurError.noMicrophone }
         converter = AVAudioConverter(from: format, to: target)

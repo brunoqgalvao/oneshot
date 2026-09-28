@@ -18,6 +18,8 @@ final class AppController: ObservableObject {
     @Published private(set) var inFlight = 0
     @Published private(set) var hotkeyActive = false
     @Published private(set) var canRetry = false
+    /// True while the dictation key is physically held (drives the practice key cap).
+    @Published private(set) var triggerHeld = false
     var onStateChange: (() -> Void)?
     var openSettings: ((String?) -> Void)?
 
@@ -42,14 +44,15 @@ final class AppController: ObservableObject {
     // MARK: Setup
 
     func start() {
-        hotkey.onPress = { [weak self] in self?.triggerPressed() }
-        hotkey.onRelease = { [weak self] in self?.triggerReleased() }
+        hotkey.onPress = { [weak self] in self?.triggerHeld = true; self?.triggerPressed() }
+        hotkey.onRelease = { [weak self] in self?.triggerHeld = false; self?.triggerReleased() }
         hotkey.onSpaceWhileHeld = { [weak self] in self?.lockFromSpace() ?? false }
         hotkey.onEscape = { [weak self] in self?.escape() ?? false }
         hotkey.onOtherKeyWhileHeld = { [weak self] in self?.otherKeyWhileHeld() }
         hotkey.onControlDown = { [weak self] in self?.enableCommandMode() }
         hud.model.onStop = { [weak self] in self?.finish() }
         hud.model.onCancel = { [weak self] in self?.cancel(silent: false) }
+        hud.model.onRetry = { [weak self] in self?.retryLast() }
         recorder.onLevel = { [weak self] level in
             DispatchQueue.main.async { self?.pushLevel(CGFloat(level)) }
         }
@@ -155,6 +158,7 @@ final class AppController: ObservableObject {
         lastFailure = nil
         canRetry = false
         hud.model.command = s.command
+        hud.model.canRetry = false
         hud.show(.processing)
         run(rec, s, releasedAt: Date())
     }
@@ -217,6 +221,7 @@ final class AppController: ObservableObject {
         if fake != nil { startFakeLevels() }
 
         let m = hud.model
+        m.canRetry = false
         m.resetLevels()
         m.locked = locked
         m.command = false
@@ -264,6 +269,7 @@ final class AppController: ObservableObject {
             flash(.notice("Didn't hear anything — is the mic muted?"), sound: false)
             return
         }
+        hud.model.canRetry = false
         hud.show(.processing)
         run(rec, s, releasedAt: Date())
     }
@@ -341,7 +347,7 @@ final class AppController: ObservableObject {
             }
             lastFailure = (rec, s)
             canRetry = true
-            flash(.error(Self.describe(error) + " — Retry from the menu"), sound: true, seconds: 4)
+            flash(.error(Self.describe(error)), sound: true, seconds: 6, retry: true)
         }
     }
 
@@ -430,8 +436,9 @@ final class AppController: ObservableObject {
 
     // MARK: Helpers
 
-    private func flash(_ phase: HUDModel.Phase, sound: Bool, seconds: Double = 2.2) {
+    private func flash(_ phase: HUDModel.Phase, sound: Bool, seconds: Double = 2.2, retry: Bool = false) {
         if sound { Sound.play(.error) }
+        hud.model.canRetry = retry
         if case .notice = phase { hud.show(phase, autoHideAfter: 1.6) } else { hud.show(phase, autoHideAfter: seconds) }
     }
 
