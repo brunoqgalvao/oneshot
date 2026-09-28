@@ -168,11 +168,16 @@ final class AppController: ObservableObject {
 
     private func begin(locked: Bool) {
         guard session == nil else { return }
-        if prefs.engine == .openAI, prefs.effectiveAPIKey == nil,
-           !(prefs.offlineFallback && AppleTranscriber.status == .authorized) {
+        switch prefs.engine {
+        case .cloud where !Account.shared.isSignedIn:
+            flash(.error("Sign in to Murmur (it's free) to start dictating"), sound: true)
+            openSettings?("setup")
+            return
+        case .openAI where prefs.effectiveAPIKey == nil && !appleFallbackOK:
             flash(.error("Add an OpenAI API key in Settings"), sound: true)
             openSettings?("ai")
             return
+        default: break
         }
         let focus = FocusSnapshot.capture(readText: true)
         if focus.isSecure {
@@ -204,7 +209,11 @@ final class AppController: ObservableObject {
         session = Session(locked: locked, command: false, focus: focus, fakeAudio: fake)
         isRecording = true
         onStateChange?()
-        if prefs.engine == .openAI { OpenAIClient.prewarm() }
+        switch prefs.engine {
+        case .cloud: CloudClient.prewarm(prefs.serverURL)
+        case .openAI: OpenAIClient.prewarm()
+        case .apple: break
+        }
         if fake != nil { startFakeLevels() }
 
         let m = hud.model
@@ -268,44 +277,34 @@ final class AppController: ObservableObject {
         }
     }
 
+    private struct Outcome { var raw: String; var text: String; var mode: String; var engine: String }
+
     private func process(_ rec: Recording, _ s: Session, releasedAt: Date) async {
         var audioURL: URL?
         do {
             let url = try rec.writeCompressed()
             audioURL = url
-            let (raw0, engineName) = try await transcribe(url: url)
-            let raw = raw0.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            var selection = s.focus.selectedText
+            // AX couldn't see the field (common in Electron apps): read the selection via ⌘C.
+            if s.command, (selection ?? "").isEmpty, s.focus.role == nil, AXIsProcessTrusted(),
+               NSWorkspace.shared.frontmostApplication?.processIdentifier == s.focus.pid {
+                selection = await Paster.copySelection()
+            }
+
+            let out: Outcome
+            switch prefs.engine {
+            case .cloud: out = try await viaCloud(url: url, rec: rec, s: s, selection: selection)
+            case .openAI, .apple: out = try await viaDirect(url: url, s: s, selection: selection)
+            }
+
+            let raw = out.raw.trimmingCharacters(in: .whitespacesAndNewlines)
             if raw.isEmpty || Hallucination.isLikely(raw, rec) {
                 try? FileManager.default.removeItem(at: url)
                 flash(.notice("Didn't catch that"), sound: false)
                 return
             }
-
-            let client = prefs.effectiveAPIKey.map { OpenAIClient(apiKey: $0) }
-            var text = raw
-            var mode = "dictate"
-            if s.command, let client {
-                mode = "command"
-                var selection = s.focus.selectedText
-                // AX couldn't see the field (common in Electron apps): read the selection via ⌘C.
-                if (selection ?? "").isEmpty, s.focus.role == nil, AXIsProcessTrusted(),
-                   NSWorkspace.shared.frontmostApplication?.processIdentifier == s.focus.pid {
-                    selection = await Paster.copySelection()
-                }
-                text = try await Cleaner(client: client).command(
-                    instruction: raw, selection: selection, destination: s.focus.destination,
-                    appName: s.focus.appName, model: prefs.commandModel)
-            } else if prefs.cleanupEnabled, let client {
-                do {
-                    let cleaned = try await Cleaner(client: client).clean(
-                        raw: raw, destination: s.focus.destination, appName: s.focus.appName,
-                        contextBefore: prefs.useContext ? s.focus.textBeforeCursor : nil,
-                        vocabulary: prefs.vocabularyTerms, model: prefs.cleanupModel)
-                    if !cleaned.isEmpty, !Cleaner.looksLikeDrift(raw: raw, cleaned: cleaned) { text = cleaned }
-                } catch {
-                    NSLog("Murmur cleanup failed, using raw transcript: \(error)")
-                }
-            }
+            var text = out.text.isEmpty ? raw : out.text
             if !s.command { text = Spacing.join(text, after: s.focus.textBeforeCursor) }
             guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 flash(.notice("Didn't catch that"), sound: false); return
@@ -316,22 +315,87 @@ final class AppController: ObservableObject {
             let pasted = debugUnsafe ? { Paster.copy(text); return false }() : insert(text)
             let latency = Date().timeIntervalSince(releasedAt)
             history.add(Dictation(raw: raw, text: text.trimmingCharacters(in: .whitespaces), app: s.focus.appName,
-                                  mode: mode, engine: engineName, audioSeconds: rec.duration, latency: latency))
+                                  mode: out.mode, engine: out.engine, audioSeconds: rec.duration, latency: latency))
             try? FileManager.default.removeItem(at: url)
             lastFailure = nil
             canRetry = false
             if !isRecording {
                 let words = text.split(whereSeparator: { $0.isWhitespace }).count
-                let what = pasted ? (mode == "command" ? "Replaced" : "\(words) word\(words == 1 ? "" : "s")") : "Copied — press ⌘V"
+                let what = pasted ? (out.mode == "command" ? "Replaced" : "\(words) word\(words == 1 ? "" : "s")") : "Copied — press ⌘V"
                 hud.show(.done("\(what) · \(String(format: "%.1f", latency))s"), autoHideAfter: pasted ? 1.1 : 2.5)
             }
         } catch {
             if let audioURL { try? FileManager.default.removeItem(at: audioURL) }
+            NSLog("Murmur failed: \(error)")
+            if let e = error as? CloudError {
+                if e.status == 401 {
+                    Account.shared.sessionExpired()
+                    flash(.error("Please sign in to Murmur again"), sound: true, seconds: 3)
+                    openSettings?("setup")
+                    return
+                }
+                if e.code == "daily_limit" || e.code == "at_capacity" || e.code == "too_long" {
+                    flash(.error(e.localizedDescription), sound: true, seconds: 4)
+                    return
+                }
+            }
             lastFailure = (rec, s)
             canRetry = true
-            NSLog("Murmur failed: \(error)")
             flash(.error(Self.describe(error) + " — Retry from the menu"), sound: true, seconds: 4)
         }
+    }
+
+    private var appleFallbackOK: Bool { prefs.offlineFallback && AppleTranscriber.status == .authorized }
+
+    /// One request to the Murmur server: it transcribes and cleans up.
+    private func viaCloud(url: URL, rec: Recording, s: Session, selection: String?) async throws -> Outcome {
+        let meta = DictateMeta(
+            mode: s.command ? "command" : "dictate",
+            durationSeconds: rec.duration,
+            language: prefs.language,
+            vocabulary: prefs.vocabularyTerms,
+            destination: s.focus.destination.rawValue,
+            appName: s.focus.appName,
+            contextBefore: prefs.useContext ? s.focus.textBeforeCursor : nil,
+            selection: s.command ? selection : nil,
+            cleanup: prefs.cleanupEnabled)
+        do {
+            let r = try await Account.shared.client.dictate(fileURL: url, meta: meta)
+            Account.shared.update(usage: r.usage)
+            onStateChange?()
+            return Outcome(raw: r.raw, text: r.text, mode: r.mode, engine: "murmur")
+        } catch let e as URLError where appleFallbackOK && !s.command {
+            NSLog("Murmur: server unreachable (\(e.code.rawValue)), transcribing on-device")
+            let raw = try await apple.transcribe(url: url, language: prefs.language, vocabulary: prefs.vocabularyTerms)
+            return Outcome(raw: raw, text: raw, mode: "dictate", engine: "apple (offline fallback)")
+        }
+    }
+
+    /// Own OpenAI key or on-device engine: transcribe here, then clean up with OpenAI if a key is set.
+    private func viaDirect(url: URL, s: Session, selection: String?) async throws -> Outcome {
+        let (raw0, engineName) = try await transcribe(url: url)
+        let raw = raw0.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else { return Outcome(raw: "", text: "", mode: "dictate", engine: engineName) }
+        let client = prefs.effectiveAPIKey.map { OpenAIClient(apiKey: $0) }
+        if s.command, let client {
+            let text = try await Cleaner(client: client).command(
+                instruction: raw, selection: selection, destination: s.focus.destination,
+                appName: s.focus.appName, model: prefs.commandModel)
+            return Outcome(raw: raw, text: text, mode: "command", engine: engineName)
+        }
+        var text = raw
+        if prefs.cleanupEnabled, let client {
+            do {
+                let cleaned = try await Cleaner(client: client).clean(
+                    raw: raw, destination: s.focus.destination, appName: s.focus.appName,
+                    contextBefore: prefs.useContext ? s.focus.textBeforeCursor : nil,
+                    vocabulary: prefs.vocabularyTerms, model: prefs.cleanupModel)
+                if !cleaned.isEmpty, !Cleaner.looksLikeDrift(raw: raw, cleaned: cleaned) { text = cleaned }
+            } catch {
+                NSLog("Murmur cleanup failed, using raw transcript: \(error)")
+            }
+        }
+        return Outcome(raw: raw, text: text, mode: "dictate", engine: engineName)
     }
 
     private func transcribe(url: URL) async throws -> (String, String) {
@@ -339,9 +403,8 @@ final class AppController: ObservableObject {
         if prefs.engine == .apple {
             return (try await apple.transcribe(url: url, language: prefs.language, vocabulary: vocab), "apple")
         }
-        let appleOK = prefs.offlineFallback && AppleTranscriber.status == .authorized
         guard let key = prefs.effectiveAPIKey else {
-            if appleOK { return (try await apple.transcribe(url: url, language: prefs.language, vocabulary: vocab), "apple") }
+            if appleFallbackOK { return (try await apple.transcribe(url: url, language: prefs.language, vocabulary: vocab), "apple") }
             throw MurmurError.noAPIKey
         }
         do {
@@ -349,7 +412,7 @@ final class AppController: ObservableObject {
             let text = try await OpenAIClient(apiKey: key).transcribe(
                 fileURL: url, model: prefs.transcribeModel, prompt: prompt, language: prefs.language)
             return (text, prefs.transcribeModel)
-        } catch let e as URLError where appleOK {
+        } catch let e as URLError where appleFallbackOK {
             NSLog("Murmur: network error \(e.code.rawValue), falling back to on-device")
             return (try await apple.transcribe(url: url, language: prefs.language, vocabulary: vocab), "apple (offline fallback)")
         }
@@ -393,10 +456,12 @@ final class AppController: ObservableObject {
         if let e = error as? URLError {
             switch e.code {
             case .notConnectedToInternet: return "You're offline"
-            case .timedOut: return "OpenAI timed out"
+            case .cannotFindHost, .cannotConnectToHost: return "Can't reach the Murmur server"
+            case .timedOut: return "The request timed out"
             default: return "Network error"
             }
         }
+        if let e = error as? CloudError { return e.localizedDescription }
         if let e = error as? MurmurError, case .http(let code, let msg) = e {
             if code == 401 { return "OpenAI rejected the API key" }
             if code == 429 { return "OpenAI rate limit or quota reached" }

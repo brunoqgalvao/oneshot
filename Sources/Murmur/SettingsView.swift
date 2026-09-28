@@ -95,14 +95,11 @@ struct SetupView: View {
                         SystemPane.open("ax")
                     }
                     Divider()
-                    HStack(alignment: .top, spacing: 12) {
-                        StatusIcon(done: prefs.effectiveAPIKey != nil)
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("OpenAI API key").font(.system(size: 13, weight: .semibold))
-                            Text("Used for transcription and cleanup. Stored only on this Mac.").font(.system(size: 12)).foregroundColor(.secondary)
-                            SecureField("sk-…", text: $prefs.apiKey).textFieldStyle(.roundedBorder)
-                        }
-                    }.padding(.vertical, 12)
+                    switch prefs.engine {
+                    case .cloud: AccountRow()
+                    case .openAI: APIKeyRow()
+                    case .apple: EmptyView()
+                    }
                     if prefs.trigger == .fn {
                         Divider()
                         StepRow(done: perms.fnUsage == 0, optional: true, title: "Globe key",
@@ -144,6 +141,90 @@ struct SetupView: View {
         }
         .onAppear { perms.startPolling() }
         .onDisappear { perms.stopPolling() }
+    }
+}
+
+struct AccountRow: View {
+    @ObservedObject private var account = Account.shared
+    @ObservedObject private var prefs = Prefs.shared
+    @State private var create = true
+    @State private var email = ""
+    @State private var password = ""
+
+    private var valid: Bool { email.contains("@") && email.contains(".") && password.count >= 8 }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            StatusIcon(done: account.isSignedIn)
+            VStack(alignment: .leading, spacing: 8) {
+                if account.isSignedIn {
+                    Text("Murmur account").font(.system(size: 13, weight: .semibold))
+                    HStack(spacing: 6) {
+                        Text(account.email ?? "Signed in").font(.system(size: 12))
+                        if let u = account.usage {
+                            Text("· \(u.remainingMinutes) of \(u.limitMinutes) free minutes left today")
+                                .font(.system(size: 12)).foregroundColor(.secondary)
+                        }
+                    }
+                } else {
+                    HStack {
+                        Text("Free Murmur account").font(.system(size: 13, weight: .semibold))
+                        Spacer()
+                        Picker("", selection: $create) {
+                            Text("Create account").tag(true)
+                            Text("Sign in").tag(false)
+                        }
+                        .pickerStyle(.segmented).labelsHidden().fixedSize()
+                    }
+                    Text("Transcription and cleanup run on Murmur's server. No API key needed.")
+                        .font(.system(size: 12)).foregroundColor(.secondary)
+                    TextField("Email", text: $email).textFieldStyle(.roundedBorder).textContentType(.username)
+                    SecureField(create ? "Password (8+ characters)" : "Password", text: $password)
+                        .textFieldStyle(.roundedBorder).onSubmit(submit)
+                    HStack(spacing: 10) {
+                        Button(create ? "Create free account" : "Sign in", action: submit)
+                            .keyboardShortcut(.defaultAction)
+                            .disabled(!valid || account.busy)
+                        if account.busy { ProgressView().controlSize(.small) }
+                        if let err = account.error {
+                            Text(err).font(.system(size: 12)).foregroundColor(.red).fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+                Button("Use your own OpenAI key instead") { prefs.engine = .openAI }
+                    .buttonStyle(.link).font(.system(size: 11))
+            }
+            if account.isSignedIn {
+                Spacer()
+                Button("Sign out") { Task { await account.signOut() } }.controlSize(.small)
+            }
+        }
+        .padding(.vertical, 12)
+        .onChange(of: create) { _ in account.error = nil }
+    }
+
+    private func submit() {
+        guard valid, !account.busy else { return }
+        Task {
+            await account.signIn(create: create, email: email, password: password)
+            if account.isSignedIn { password = "" }
+        }
+    }
+}
+
+struct APIKeyRow: View {
+    @ObservedObject private var prefs = Prefs.shared
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            StatusIcon(done: prefs.effectiveAPIKey != nil)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("OpenAI API key").font(.system(size: 13, weight: .semibold))
+                Text("Your key, billed to your OpenAI account. Stored only on this Mac.").font(.system(size: 12)).foregroundColor(.secondary)
+                SecureField("sk-…", text: $prefs.apiKey).textFieldStyle(.roundedBorder)
+                Button("Use a free Murmur account instead") { prefs.engine = .cloud }
+                    .buttonStyle(.link).font(.system(size: 11))
+            }
+        }.padding(.vertical, 12)
     }
 }
 
@@ -220,9 +301,6 @@ struct GeneralView: View {
                 CheatSheet(trigger: prefs.trigger.short).padding(.vertical, 4)
             }
             Section("Transcription") {
-                Picker("Engine", selection: $prefs.engine) {
-                    ForEach(Engine.allCases) { Text($0.label).tag($0) }
-                }
                 Picker("Language", selection: $prefs.language) {
                     Text("Auto-detect").tag("auto")
                     Text("English").tag("en")
@@ -257,21 +335,32 @@ struct AIView: View {
 
     var body: some View {
         Form {
-            Section("OpenAI") {
-                SecureField("API key", text: $prefs.apiKey)
-                HStack {
-                    Button(testing ? "Testing…" : "Test connection") { test() }.disabled(testing || prefs.effectiveAPIKey == nil)
-                    if let testResult { Text(testResult).font(.system(size: 12)).foregroundColor(.secondary) }
+            Section {
+                Picker("Engine", selection: $prefs.engine) {
+                    ForEach(Engine.allCases) { Text($0.label).tag($0) }
                 }
-                Picker("Speech model", selection: $prefs.transcribeModel) {
-                    Text("gpt-4o-transcribe").tag("gpt-4o-transcribe")
-                    Text("gpt-4o-mini-transcribe (faster)").tag("gpt-4o-mini-transcribe")
-                    Text("gpt-transcribe").tag("gpt-transcribe")
-                    Text("whisper-1").tag("whisper-1")
+                switch prefs.engine {
+                case .cloud: AccountRow()
+                case .openAI:
+                    SecureField("API key", text: $prefs.apiKey)
+                    HStack {
+                        Button(testing ? "Testing…" : "Test connection") { test() }.disabled(testing || prefs.effectiveAPIKey == nil)
+                        if let testResult { Text(testResult).font(.system(size: 12)).foregroundColor(.secondary) }
+                    }
+                    Picker("Speech model", selection: $prefs.transcribeModel) {
+                        Text("gpt-4o-transcribe").tag("gpt-4o-transcribe")
+                        Text("gpt-4o-mini-transcribe (faster)").tag("gpt-4o-mini-transcribe")
+                        Text("gpt-transcribe").tag("gpt-transcribe")
+                        Text("whisper-1").tag("whisper-1")
+                    }
+                case .apple:
+                    Text("Audio never leaves this Mac. Cleanup is off unless you also add an OpenAI key.")
+                        .font(.system(size: 12)).foregroundColor(.secondary)
                 }
-            }
+            } header: { Text("Transcription") }
             Section {
                 Toggle("Clean up transcripts", isOn: $prefs.cleanupEnabled)
+                if prefs.engine == .openAI {
                 Picker("Cleanup model", selection: $prefs.cleanupModel) {
                     Text("gpt-5.4-mini").tag("gpt-5.4-mini")
                     Text("gpt-5.4-nano (fastest)").tag("gpt-5.4-nano")
@@ -282,6 +371,7 @@ struct AIView: View {
                     Text("gpt-5.4-mini").tag("gpt-5.4-mini")
                     Text("gpt-5.4").tag("gpt-5.4")
                     Text("gpt-4.1-mini").tag("gpt-4.1-mini")
+                }
                 }
                 Toggle("Use text around the cursor for context", isOn: $prefs.useContext)
             } header: { Text("Cleanup") } footer: {

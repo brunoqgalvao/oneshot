@@ -12,6 +12,7 @@
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>LSMinimumSystemVersion</key><string>13.0</string>
     <key>LSUIElement</key><true/>
+    <key>MurmurServerURL</key><string>http://localhost:8787</string>
     <key>NSHighResolutionCapable</key><true/>
     <key>NSMicrophoneUsageDescription</key><string>Murmur records your voice while you hold the dictation key, then types the transcript where your cursor is.</string>
     <key>NSSpeechRecognitionUsageDescription</key><string>Murmur can transcribe on this Mac when the network is slow or offline.</string>

@@ -2,3 +2,5 @@
 build/
 .signing/
 .DS_Store
+.server-url
+server/data/

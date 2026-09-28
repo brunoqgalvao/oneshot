@@ -13,6 +13,10 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp .build/release/Murmur "$APP/Contents/MacOS/Murmur"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
+# MURMUR_SERVER_URL=https://… ./build.sh points the app at a deployed server.
+SERVER_URL="${MURMUR_SERVER_URL:-$(cat .server-url 2>/dev/null || echo http://localhost:8787)}"
+plutil -replace MurmurServerURL -string "$SERVER_URL" "$APP/Contents/Info.plist"
+echo "Server: $SERVER_URL"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
 [ -f .signing/murmur.keychain-db ] || ./scripts/make_signing_identity.sh || true

@@ -35,7 +35,15 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         let header = NSMenuItem(title: controller.hotkeyActive ? "Hold \(prefs.trigger.short) to dictate" : "Finish setup to start dictating", action: nil, keyEquivalent: "")
         header.isEnabled = false
         menu.addItem(header)
-        if !controller.hotkeyActive || AudioRecorder.permission != .authorized || prefs.effectiveAPIKey == nil && prefs.engine == .openAI {
+        let account = Account.shared
+        if prefs.engine == .cloud, account.isSignedIn, let u = account.usage {
+            let usage = NSMenuItem(title: "\(u.remainingMinutes) of \(u.limitMinutes) free minutes left today", action: nil, keyEquivalent: "")
+            usage.isEnabled = false
+            menu.addItem(usage)
+        }
+        let needsAccount = prefs.engine == .cloud && !account.isSignedIn
+        let needsKey = prefs.engine == .openAI && prefs.effectiveAPIKey == nil
+        if !controller.hotkeyActive || AudioRecorder.permission != .authorized || needsAccount || needsKey {
             menu.addItem(make("Finish Setup…", #selector(openSetup)))
         }
         menu.addItem(.separator())

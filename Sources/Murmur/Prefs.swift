@@ -40,11 +40,12 @@ enum TriggerKey: String, CaseIterable, Identifiable {
 }
 
 enum Engine: String, CaseIterable, Identifiable {
-    case openAI, apple
+    case cloud, openAI, apple
     var id: String { rawValue }
     var label: String {
         switch self {
-        case .openAI: return "OpenAI (best accuracy)"
+        case .cloud: return "Murmur account (free)"
+        case .openAI: return "Your own OpenAI key"
         case .apple: return "On this Mac (private, offline)"
         }
     }
@@ -73,10 +74,19 @@ final class Prefs: ObservableObject {
     /// Debug/testing: when set, recordings use this audio file instead of the microphone.
     var debugAudioFile: String? { d.string(forKey: "debugAudioFile") }
 
+    /// The Murmur server. Baked into Info.plist at build time; overridable with
+    /// `defaults write com.brunogalvao.murmur serverURL http://localhost:8787`.
+    var serverURL: URL {
+        let s = d.string(forKey: "serverURL")
+            ?? Bundle.main.object(forInfoDictionaryKey: "MurmurServerURL") as? String
+            ?? "http://localhost:8787"
+        return URL(string: s) ?? URL(string: "http://localhost:8787")!
+    }
+
     private init() {
         d.register(defaults: [
             "trigger": TriggerKey.fn.rawValue,
-            "engine": Engine.openAI.rawValue,
+            "engine": Engine.cloud.rawValue,
             "transcribeModel": "gpt-4o-transcribe",
             "cleanupEnabled": true,
             "cleanupModel": "gpt-5.4-mini",
@@ -89,7 +99,7 @@ final class Prefs: ObservableObject {
             "offlineFallback": true,
         ])
         trigger = TriggerKey(rawValue: d.string(forKey: "trigger") ?? "") ?? .fn
-        engine = Engine(rawValue: d.string(forKey: "engine") ?? "") ?? .openAI
+        engine = Engine(rawValue: d.string(forKey: "engine") ?? "") ?? .cloud
         transcribeModel = d.string(forKey: "transcribeModel") ?? "gpt-4o-transcribe"
         cleanupEnabled = d.bool(forKey: "cleanupEnabled")
         cleanupModel = d.string(forKey: "cleanupModel") ?? "gpt-5.4-mini"

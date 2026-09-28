@@ -1,7 +1,7 @@
 import Foundation
 
 /// Where the text is going, so the cleanup can match tone and format.
-enum Destination {
+enum Destination: String {
     case chat, email, code, aiPrompt, document, generic
 
     static func classify(bundleID: String?, appName: String?, windowTitle: String?) -> Destination {
