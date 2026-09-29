@@ -341,6 +341,9 @@ private struct AccessibilityStep: View {
     @ObservedObject private var controller = AppController.shared
     @State private var trusted = AXIsProcessTrusted()
     @State private var waited = 0
+    /// Polls since the user went to System Settings without the permission taking effect.
+    @State private var stuck = 0
+    @State private var openedSettings = false
     private let poll = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
 
     private var ready: Bool { trusted && controller.hotkeyActive }
@@ -364,20 +367,41 @@ private struct AccessibilityStep: View {
                     Text("macOS sometimes needs a restart to apply the permission.").font(.system(size: 11)).foregroundColor(.secondary)
                 }
             } else {
-                Button("Open System Settings") {
-                    let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: false] as CFDictionary
-                    _ = AXIsProcessTrustedWithOptions(opts)
-                    SystemPane.open("ax")
+                VStack(spacing: 10) {
+                    Button("Open System Settings") { openSettings() }
+                        .buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.defaultAction)
+                    // An older Oneshot (different signature) can leave a switch that looks on but no longer
+                    // applies. Resetting removes that stale entry so the new app can be switched on.
+                    if stuck > 16 {
+                        Button("Already switched on? Reset the permission") {
+                            let p = Process()
+                            p.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+                            p.arguments = ["reset", "Accessibility", Bundle.main.bundleIdentifier ?? "fm.oneshot.app"]
+                            try? p.run(); p.waitUntilExit()
+                            stuck = 0
+                            openSettings()
+                        }
+                        .buttonStyle(.link).font(.system(size: 12))
+                        .transition(.opacity)
+                    }
                 }
-                .buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.defaultAction)
+                .animation(Brand.easeOut(0.2), value: stuck > 16)
             }
         }
         .onReceive(poll) { _ in
             let wasReady = ready
             trusted = AXIsProcessTrusted()
             if trusted && !controller.hotkeyActive { waited += 1 }
+            if openedSettings && !trusted { stuck += 1 }
             if !wasReady && ready { DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { model.next() } }
         }
+    }
+
+    private func openSettings() {
+        let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: false] as CFDictionary
+        _ = AXIsProcessTrustedWithOptions(opts)
+        SystemPane.open("ax")
+        openedSettings = true
     }
 }
 
