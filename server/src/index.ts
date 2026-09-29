@@ -86,15 +86,25 @@ type DictateMeta = {
 async function dictate(req: Request, user: User) {
   if (!allow(`dictate:${user.id}`, 30, 60_000)) return fail(429, "rate_limited", "Slow down a little — too many dictations this minute.");
   const form = await req.formData().catch(() => null);
-  const audio = form?.get("audio");
-  if (!(audio instanceof File)) return fail(400, "no_audio", "Missing audio.");
-  if (audio.size > config.maxAudioBytes) return fail(413, "too_long", "That recording is too long.");
+  // Long recordings arrive as several "audio" parts, in order.
+  const parts = (form?.getAll("audio") ?? []).filter((p): p is File => p instanceof File && p.size > 0);
+  if (!parts.length) return fail(400, "no_audio", "Missing audio.");
+  const bytes = parts.reduce((n, p) => n + p.size, 0);
+  if (bytes > config.maxAudioBytes || parts.some((p) => p.size > config.maxPartBytes)) {
+    return fail(413, "too_long", "That recording is too large to send.");
+  }
   let meta: DictateMeta = {};
   try { meta = JSON.parse(String(form?.get("meta") ?? "{}")); } catch {}
 
   // Bill at least what the file size implies (AAC at ~6 KB/s), so the client can't under-report.
-  const seconds = Math.min(config.maxAudioSeconds, Math.max(Number(meta.durationSeconds) || 0, audio.size / 8000, 0.5));
-  if (seconds >= config.maxAudioSeconds) return fail(413, "too_long", "Recordings are limited to 5 minutes.");
+  const seconds = Math.max(Number(meta.durationSeconds) || 0, bytes / 8000, 0.5);
+  if (seconds > config.maxAudioSeconds + 30) {
+    return fail(413, "too_long", `Recordings are limited to ${Math.round(config.maxAudioSeconds / 3600)} hours.`);
+  }
+  // Older apps send one unsplit file; OpenAI can't take more than ~25 minutes in one piece.
+  if (parts.length === 1 && seconds > config.maxPartSeconds) {
+    return fail(413, "update_required", "Update Oneshot to dictate for longer than 20 minutes.");
+  }
   const used = Usage.userSeconds(user.id);
   if (used + seconds > config.freeDailySeconds) {
     return json({ error: "daily_limit", message: `You've used today's free ${Math.round(config.freeDailySeconds / 60)} minutes. It resets at midnight UTC.`, usage: usageOf(user) }, 429);
@@ -105,10 +115,9 @@ async function dictate(req: Request, user: User) {
 
   const vocabulary = (meta.vocabulary ?? []).map(String).slice(0, 100);
   const t0 = performance.now();
-  const raw = (await transcribe(audio, {
-    prompt: vocabulary.length ? "Vocabulary: " + vocabulary.join(", ") : undefined,
-    language: meta.language,
-  })).trim();
+  const prompt = vocabulary.length ? "Vocabulary: " + vocabulary.join(", ") : undefined;
+  const pieces = await mapLimit(parts, 8, (p) => withRetry(() => transcribe(p, { prompt, language: meta.language })));
+  const raw = pieces.map((t) => t.trim()).filter(Boolean).join(" ");
   const t1 = performance.now();
   Usage.add(user.id, seconds);
 
@@ -119,22 +128,67 @@ async function dictate(req: Request, user: User) {
       instruction: raw, selection: meta.selection?.slice(0, 20_000), destination: meta.destination, appName: meta.appName,
     }), 4000));
   } else if (raw && meta.cleanup !== false) {
-    try {
-      const cleaned = strip(await chat(config.cleanupModel, dictationSystem, dictationUser({
-        raw, destination: meta.destination, appName: meta.appName,
-        contextBefore: meta.contextBefore?.slice(-600), vocabulary,
-      })));
-      if (cleaned && !looksLikeDrift(raw, cleaned)) text = cleaned;
-    } catch (e) {
-      console.warn("cleanup failed, returning raw transcript:", (e as Error).message);
-    }
+    // Long transcripts are cleaned in ~1,200 word pieces, in parallel; a piece that fails keeps its raw text.
+    const chunks = splitForCleanup(raw, 1200);
+    const cleanedChunks = await mapLimit(chunks, 8, async (chunk, i) => {
+      try {
+        const cleaned = strip(await chat(config.cleanupModel, dictationSystem, dictationUser({
+          raw: chunk, destination: meta.destination, appName: meta.appName,
+          contextBefore: i === 0 ? meta.contextBefore?.slice(-600) : chunks[i - 1].slice(-600), vocabulary,
+        }), 4000));
+        return cleaned && !looksLikeDrift(chunk, cleaned) ? cleaned : chunk;
+      } catch (e) {
+        console.warn("cleanup failed, returning raw transcript:", (e as Error).message);
+        return chunk;
+      }
+    });
+    text = cleanedChunks.join(chunks.length > 1 ? "\n\n" : "");
   }
   const t2 = performance.now();
   return json({
     raw, text, mode,
     usage: usageOf(user),
-    timings: { transcribeMs: Math.round(t1 - t0), cleanupMs: Math.round(t2 - t1) },
+    timings: { transcribeMs: Math.round(t1 - t0), cleanupMs: Math.round(t2 - t1), parts: parts.length },
   });
+}
+
+/** Runs `fn` over `items` with at most `limit` in flight, keeping order. */
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => { while (next < items.length) { const i = next++; out[i] = await fn(items[i], i); } };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
+}
+
+/** One retry for transient OpenAI failures (timeouts, 429, 5xx). */
+async function withRetry<R>(fn: () => Promise<R>): Promise<R> {
+  try { return await fn(); } catch (e) {
+    const status = (e as any)?.status;
+    if (status && status < 500 && status !== 429) throw e;
+    await Bun.sleep(800);
+    return fn();
+  }
+}
+
+/** Splits a transcript into pieces of about `words` words, ending on a sentence when possible. */
+function splitForCleanup(raw: string, words: number): string[] {
+  const tokens = raw.split(/\s+/).filter(Boolean);
+  if (tokens.length <= words * 1.25) return [raw];
+  const out: string[] = [];
+  let start = 0;
+  while (start < tokens.length) {
+    let end = Math.min(tokens.length, start + words);
+    if (end < tokens.length) {
+      // Look up to 150 words ahead for the end of a sentence.
+      for (let j = end; j < Math.min(tokens.length, end + 150); j++) {
+        if (/[.!?…]["')\]]?$/.test(tokens[j - 1])) { end = j; break; }
+      }
+    }
+    out.push(tokens.slice(start, end).join(" "));
+    start = end;
+  }
+  return out;
 }
 
 const PUBLIC = new URL("../public/", import.meta.url).pathname;

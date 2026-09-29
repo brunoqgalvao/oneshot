@@ -22,54 +22,19 @@ enum OneshotError: LocalizedError {
     }
 }
 
+/// A finished recording: compressed audio on disk, split into parts of up to 10 minutes
+/// so a 3-hour dictation never sits in memory and each part fits OpenAI's upload limits.
 struct Recording {
-    let samples: [Float]      // 16 kHz mono
-    let sampleRate: Double = 16_000
-    let peak: Float
-    var duration: Double { Double(samples.count) / sampleRate }
+    static let maxDuration: Double = 3 * 3600
+    var parts: [URL]
+    var duration: Double
+    var peak: Float
+    /// The folder holding the parts (deleted after a successful dictation).
+    var folder: URL? { parts.first?.deletingLastPathComponent() }
 
-    /// Encodes to AAC (m4a, ~3 KB/s) so uploads stay small on slow connections.
-    /// Falls back to 16-bit WAV if the AAC encoder is unavailable.
-    func writeCompressed() throws -> URL {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("Oneshot", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let id = UUID().uuidString
-        let m4a = dir.appendingPathComponent("\(id).m4a")
-        do {
-            try write(to: m4a, settings: [
-                AVFormatIDKey: kAudioFormatMPEG4AAC,
-                AVSampleRateKey: sampleRate,
-                AVNumberOfChannelsKey: 1,
-                AVEncoderBitRateKey: 24_000,
-                AVEncoderBitRateStrategyKey: AVAudioBitRateStrategy_Constant,
-            ])
-            return m4a
-        } catch {
-            let wav = dir.appendingPathComponent("\(id).wav")
-            try write(to: wav, settings: [
-                AVFormatIDKey: kAudioFormatLinearPCM,
-                AVSampleRateKey: sampleRate,
-                AVNumberOfChannelsKey: 1,
-                AVLinearPCMBitDepthKey: 16,
-                AVLinearPCMIsFloatKey: false,
-            ])
-            return wav
-        }
-    }
+    func discard() { if let folder { try? FileManager.default.removeItem(at: folder) } }
 
-    private func write(to url: URL, settings: [String: Any]) throws {
-        let file = try AVAudioFile(forWriting: url, settings: settings, commonFormat: .pcmFormatFloat32, interleaved: false)
-        guard let buf = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(samples.count)) else {
-            throw OneshotError.noMicrophone
-        }
-        buf.frameLength = AVAudioFrameCount(samples.count)
-        samples.withUnsafeBufferPointer { src in
-            buf.floatChannelData![0].update(from: src.baseAddress!, count: samples.count)
-        }
-        try file.write(from: buf)
-    }
-
-    /// Loads any audio file as a Recording (used for testing and retries).
+    /// Loads any audio file as a Recording (used for testing without a microphone).
     static func load(url: URL) throws -> Recording {
         let file = try AVAudioFile(forReading: url)
         let target = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false)!
@@ -85,8 +50,89 @@ struct Recording {
             fed = true; status.pointee = .haveData; return input
         }
         let n = Int(out.frameLength)
-        let arr = Array(UnsafeBufferPointer(start: out.floatChannelData![0], count: n))
-        return Recording(samples: arr, peak: arr.reduce(0) { max($0, abs($1)) })
+        var peak: Float = 0
+        if let ch = out.floatChannelData?[0] { for i in 0..<n { peak = max(peak, abs(ch[i])) } }
+        let writer = try SegmentWriter()
+        try writer.append(out)
+        return Recording(parts: writer.finish(), duration: Double(n) / 16_000, peak: peak)
+    }
+}
+
+/// Streams 16 kHz mono audio to AAC files (m4a, ~3 KB/s), starting a new file every 10 minutes.
+/// Falls back to 16-bit WAV if the AAC encoder is unavailable.
+final class SegmentWriter {
+    static let partSeconds: Double = 600
+    let folder: URL
+    private(set) var parts: [URL] = []
+    private(set) var totalFrames: Int64 = 0
+    private var file: AVAudioFile?
+    private var framesInPart: Int64 = 0
+    private var useWAV = false
+
+    init() throws {
+        folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Oneshot", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    }
+
+    func append(_ buffer: AVAudioPCMBuffer) throws {
+        let capacity = Int64(Self.partSeconds * 16_000)
+        var offset: AVAudioFrameCount = 0
+        while offset < buffer.frameLength {
+            if file == nil || framesInPart >= capacity { try startPart() }
+            let count = min(buffer.frameLength - offset, AVAudioFrameCount(capacity - framesInPart))
+            if offset == 0 && count == buffer.frameLength {
+                try file?.write(from: buffer)
+            } else {
+                // The buffer crosses a part boundary: write it in two slices.
+                guard let slice = AVAudioPCMBuffer(pcmFormat: buffer.format, frameCapacity: count),
+                      let src = buffer.floatChannelData?[0], let dst = slice.floatChannelData?[0] else { return }
+                slice.frameLength = count
+                dst.update(from: src.advanced(by: Int(offset)), count: Int(count))
+                try file?.write(from: slice)
+            }
+            offset += count
+            framesInPart += Int64(count)
+            totalFrames += Int64(count)
+        }
+    }
+
+    /// Closes the current file and returns every part in order.
+    func finish() -> [URL] {
+        file = nil   // releasing the AVAudioFile finalizes it
+        return parts
+    }
+
+    private func startPart() throws {
+        file = nil
+        framesInPart = 0
+        let name = String(format: "part-%03d", parts.count + 1)
+        if !useWAV {
+            let url = folder.appendingPathComponent(name + ".m4a")
+            do {
+                file = try AVAudioFile(forWriting: url, settings: [
+                    AVFormatIDKey: kAudioFormatMPEG4AAC,
+                    AVSampleRateKey: 16_000,
+                    AVNumberOfChannelsKey: 1,
+                    AVEncoderBitRateKey: 24_000,
+                    AVEncoderBitRateStrategyKey: AVAudioBitRateStrategy_Constant,
+                ], commonFormat: .pcmFormatFloat32, interleaved: false)
+                parts.append(url)
+                return
+            } catch {
+                useWAV = true
+            }
+        }
+        let url = folder.appendingPathComponent(name + ".wav")
+        file = try AVAudioFile(forWriting: url, settings: [
+            AVFormatIDKey: kAudioFormatLinearPCM,
+            AVSampleRateKey: 16_000,
+            AVNumberOfChannelsKey: 1,
+            AVLinearPCMBitDepthKey: 16,
+            AVLinearPCMIsFloatKey: false,
+        ], commonFormat: .pcmFormatFloat32, interleaved: false)
+        parts.append(url)
     }
 }
 
@@ -98,10 +144,16 @@ final class AudioRecorder {
     private var engine = AVAudioEngine()
     private var converter: AVAudioConverter?
     private let target = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false)!
-    private var samples: [Float] = []
+    private var writer: SegmentWriter?
     private var peak: Float = 0
     private let lock = NSLock()
     private(set) var isRunning = false
+
+    /// Seconds recorded so far.
+    var elapsed: Double {
+        lock.lock(); defer { lock.unlock() }
+        return Double(writer?.totalFrames ?? 0) / 16_000
+    }
 
     static var permission: AVAuthorizationStatus { AVCaptureDevice.authorizationStatus(for: .audio) }
 
@@ -111,7 +163,8 @@ final class AudioRecorder {
 
     func start() throws {
         guard Self.permission != .denied, Self.permission != .restricted else { throw OneshotError.microphoneDenied }
-        lock.lock(); samples.removeAll(keepingCapacity: true); samples.reserveCapacity(16_000 * 30); peak = 0; lock.unlock()
+        let w = try SegmentWriter()
+        lock.lock(); writer = w; peak = 0; lock.unlock()
 
         // A fresh engine picks up device changes (AirPods connecting, etc.).
         engine = AVAudioEngine()
@@ -136,7 +189,9 @@ final class AudioRecorder {
             isRunning = false
         }
         lock.lock(); defer { lock.unlock() }
-        return Recording(samples: samples, peak: peak)
+        guard let w = writer else { return Recording(parts: [], duration: 0, peak: 0) }
+        writer = nil
+        return Recording(parts: w.finish(), duration: Double(w.totalFrames) / 16_000, peak: peak)
     }
 
     private func process(_ buffer: AVAudioPCMBuffer) {
@@ -158,7 +213,7 @@ final class AudioRecorder {
         var pk: Float = 0
         for i in 0..<n { let v = ch[i]; sum += v * v; pk = max(pk, abs(v)) }
         lock.lock()
-        samples.append(contentsOf: UnsafeBufferPointer(start: ch, count: n))
+        do { try writer?.append(out) } catch { NSLog("Oneshot: couldn't write audio: \(error)") }
         peak = max(peak, pk)
         lock.unlock()
         let db = 20 * log10(max(sqrt(sum / Float(n)), 1e-7))

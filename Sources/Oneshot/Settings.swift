@@ -418,6 +418,7 @@ struct FlowLayout: Layout {
 struct HistoryPane: View {
     var embedded = false
     @ObservedObject private var history = HistoryStore.shared
+    @ObservedObject private var pending = PendingStore.shared
     @State private var query = ""
 
     private var filtered: [Dictation] {
@@ -461,6 +462,11 @@ struct HistoryPane: View {
             .padding(.horizontal, 10).frame(height: 32)
             .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.primary.opacity(0.06)))
             .padding(.horizontal, embedded ? 32 : 20).padding(.vertical, 14)
+
+            if !pending.items.isEmpty {
+                PendingList()
+                    .padding(.horizontal, embedded ? 32 : 20).padding(.bottom, 14)
+            }
 
             if filtered.isEmpty {
                 VStack(spacing: 12) {
@@ -569,5 +575,84 @@ private struct HistoryRow: View {
         .padding(.horizontal, 14).padding(.vertical, 11)
         .contentShape(Rectangle())
         .onHover { hover = $0 }
+    }
+}
+
+// MARK: - Recordings that didn't go through
+
+/// Saved recordings that failed to transcribe, each with Try again and Delete.
+struct PendingList: View {
+    @ObservedObject private var pending = PendingStore.shared
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundColor(.orange)
+                Text("Couldn't transcribe").font(.system(size: 11, weight: .semibold)).foregroundColor(.secondary).textCase(.uppercase)
+                Spacer()
+                Text("The audio is saved on this Mac").font(.system(size: 11)).foregroundColor(.secondary)
+            }
+            .padding(.horizontal, 4)
+            VStack(spacing: 0) {
+                ForEach(pending.items) { p in
+                    PendingRow(p: p)
+                    if p.id != pending.items.last?.id { Divider().padding(.leading, 56) }
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .surface(radius: 12)
+        }
+    }
+}
+
+private struct PendingRow: View {
+    let p: PendingDictation
+    @ObservedObject private var controller = AppController.shared
+    private var busy: Bool { controller.retrying.contains(p.id) }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: p.command ? "sparkles" : "waveform")
+                .font(.system(size: 13, weight: .semibold)).foregroundColor(.orange)
+                .frame(width: 30, height: 30)
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.orange.opacity(0.12)))
+            VStack(alignment: .leading, spacing: 3) {
+                Text("\(Self.length(p.duration)) recording\(p.command ? " (command)" : "")").font(.system(size: 13, weight: .medium))
+                HStack(spacing: 4) {
+                    Text(p.app ?? "Unknown app")
+                    Text("·")
+                    Text(p.date.formatted(date: .abbreviated, time: .shortened))
+                    Text("·")
+                    Text(p.error).lineLimit(1).truncationMode(.tail)
+                }
+                .font(.system(size: 11).monospacedDigit()).foregroundColor(.secondary)
+            }
+            Spacer(minLength: 8)
+            Button {
+                controller.retry(p.id)
+            } label: {
+                HStack(spacing: 6) {
+                    if busy { ProgressView().controlSize(.small) }
+                    Text(busy ? "Trying…" : "Try again")
+                }
+            }
+            .buttonStyle(SecondaryButtonStyle())
+            .disabled(busy)
+            .help("Transcribe it again. The text is copied to your clipboard and added to History.")
+            Button { PendingStore.shared.remove(p.id) } label: {
+                Image(systemName: "trash").font(.system(size: 12, weight: .medium)).foregroundColor(.secondary)
+                    .frame(width: 28, height: 28).contentShape(Rectangle())
+            }
+            .buttonStyle(PressableStyle())
+            .disabled(busy)
+            .help("Delete this recording")
+        }
+        .padding(.horizontal, 14).padding(.vertical, 11)
+    }
+
+    static func length(_ s: Double) -> String {
+        let t = Int(s.rounded())
+        if t < 60 { return "\(t) s" }
+        if t < 3600 { return "\(t / 60) min \(t % 60) s" }
+        return "\(t / 3600) h \((t % 3600) / 60) min"
     }
 }

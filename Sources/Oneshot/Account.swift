@@ -47,7 +47,9 @@ struct CloudClient {
     private static let session: URLSession = {
         let c = URLSessionConfiguration.ephemeral
         c.timeoutIntervalForRequest = 45
-        c.timeoutIntervalForResource = 120
+        // Long dictations (up to 3 h of audio) need minutes to upload and transcribe;
+        // each request sets its own, tighter timeout below.
+        c.timeoutIntervalForResource = 1200
         return URLSession(configuration: c)
     }()
 
@@ -85,17 +87,23 @@ struct CloudClient {
         _ = try? await Self.session.data(for: request("v1/auth/logout", method: "POST"))
     }
 
-    func dictate(fileURL: URL, meta: DictateMeta) async throws -> DictateResult {
+    /// Sends every part of a recording in one request; the server transcribes them in parallel.
+    func dictate(fileURLs: [URL], meta: DictateMeta) async throws -> DictateResult {
         let boundary = "murmur-\(UUID().uuidString)"
         var req = request("v1/dictate", method: "POST")
         req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        // Short dictations fail fast; a 3-hour one gets about 7 minutes of silence tolerance.
+        req.timeoutInterval = 45 + meta.durationSeconds / 30
         var body = Data()
         let metaJSON = String(data: try JSONEncoder().encode(meta), encoding: .utf8) ?? "{}"
         body.append("--\(boundary)\r\nContent-Disposition: form-data; name=\"meta\"\r\n\r\n\(metaJSON)\r\n".data(using: .utf8)!)
-        let ext = fileURL.pathExtension.lowercased()
-        body.append("--\(boundary)\r\nContent-Disposition: form-data; name=\"audio\"; filename=\"audio.\(ext)\"\r\nContent-Type: \(ext == "wav" ? "audio/wav" : "audio/mp4")\r\n\r\n".data(using: .utf8)!)
-        body.append(try Data(contentsOf: fileURL))
-        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+        for (i, fileURL) in fileURLs.enumerated() {
+            let ext = fileURL.pathExtension.lowercased()
+            body.append("--\(boundary)\r\nContent-Disposition: form-data; name=\"audio\"; filename=\"part-\(i + 1).\(ext)\"\r\nContent-Type: \(ext == "wav" ? "audio/wav" : "audio/mp4")\r\n\r\n".data(using: .utf8)!)
+            body.append(try Data(contentsOf: fileURL))
+            body.append("\r\n".data(using: .utf8)!)
+        }
+        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
         let (data, resp) = try await Self.session.upload(for: req, from: body)
         try Self.check(resp, data)
         return try JSONDecoder().decode(DictateResult.self, from: data)

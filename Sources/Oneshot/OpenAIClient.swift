@@ -7,7 +7,7 @@ struct OpenAIClient {
     private static let session: URLSession = {
         let c = URLSessionConfiguration.ephemeral
         c.timeoutIntervalForRequest = 45
-        c.timeoutIntervalForResource = 120
+        c.timeoutIntervalForResource = 600
         c.httpMaximumConnectionsPerHost = 4
         return URLSession(configuration: c)
     }()
@@ -25,6 +25,7 @@ struct OpenAIClient {
         let boundary = "murmur-\(UUID().uuidString)"
         var req = URLRequest(url: baseURL.appendingPathComponent("audio/transcriptions"))
         req.httpMethod = "POST"
+        req.timeoutInterval = 180   // a 10-minute part can take a while to come back
         req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
 

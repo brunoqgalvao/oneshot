@@ -9,6 +9,7 @@ final class AppController: ObservableObject {
 
     let prefs = Prefs.shared
     let history = HistoryStore.shared
+    let pending = PendingStore.shared
     let hud = HUD()
     let hotkey = HotkeyMonitor()
     private let recorder = AudioRecorder()
@@ -18,6 +19,8 @@ final class AppController: ObservableObject {
     @Published private(set) var inFlight = 0
     @Published private(set) var hotkeyActive = false
     @Published private(set) var canRetry = false
+    /// Saved recordings being retried right now (drives the History spinner).
+    @Published private(set) var retrying: Set<UUID> = []
     struct DictationEvent: Equatable { let id = UUID(); let locked: Bool; let command: Bool }
     /// The last dictation that finished successfully (drives the onboarding lessons).
     @Published private(set) var lastDictation: DictationEvent?
@@ -44,7 +47,9 @@ final class AppController: ObservableObject {
     private var fakeTimer: Timer?
     private var trustTimer: Timer?
     private var lastLevelAt = Date.distantPast
-    private var lastFailure: (Recording, Session)?
+    /// The saved recording behind the HUD's Retry button.
+    private var lastFailure: UUID?
+    private var capTimer: Timer?
     private var bag = Set<AnyCancellable>()
 
     // MARK: Setup
@@ -161,13 +166,29 @@ final class AppController: ObservableObject {
     func cancelIfRecording() { if session != nil { cancel(silent: false) } }
 
     func retryLast() {
-        guard let (rec, s) = lastFailure else { return }
+        guard let id = lastFailure, let p = pending.item(id) else { return }
         lastFailure = nil
         canRetry = false
-        hud.model.command = s.command
+        hud.model.command = p.command
         hud.model.canRetry = false
         hud.show(.processing)
-        run(rec, s, releasedAt: Date())
+        run(pending.recording(for: p), session(for: p), releasedAt: Date(), pendingID: id, deliver: .paste)
+    }
+
+    /// Tries a saved recording again from History. The result goes to the clipboard and History,
+    /// since the field it was meant for is long gone.
+    func retry(_ id: UUID) {
+        guard let p = pending.item(id), !retrying.contains(id) else { return }
+        if lastFailure == id { lastFailure = nil; canRetry = false }
+        hud.model.command = p.command
+        hud.model.canRetry = false
+        hud.show(.processing)
+        run(pending.recording(for: p), session(for: p), releasedAt: Date(), pendingID: id, deliver: .copy)
+    }
+
+    private func session(for p: PendingDictation) -> Session {
+        let focus = FocusSnapshot(appName: p.app, bundleID: p.bundleID, textBeforeCursor: p.contextBefore, selectedText: p.selection)
+        return Session(locked: true, command: p.command, focus: focus, fakeAudio: nil)
     }
 
     func pasteLast() {
@@ -227,6 +248,14 @@ final class AppController: ObservableObject {
         case .apple: break
         }
         if fake != nil { startFakeLevels() }
+        // Recordings stop by themselves at the 3-hour limit.
+        capTimer?.invalidate()
+        capTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.session != nil, self.recorder.elapsed >= Recording.maxDuration else { return }
+                self.finish()
+            }
+        }
 
         let m = hud.model
         m.canRetry = false
@@ -250,7 +279,8 @@ final class AppController: ObservableObject {
         showWork?.cancel(); showWork = nil
         pendingTap?.cancel(); pendingTap = nil
         fakeTimer?.invalidate(); fakeTimer = nil
-        if let fake = s.fakeAudio { return (try? Recording.load(url: fake)) ?? Recording(samples: [], peak: 0) }
+        capTimer?.invalidate(); capTimer = nil
+        if let fake = s.fakeAudio { return (try? Recording.load(url: fake)) ?? Recording(parts: [], duration: 0, peak: 0) }
         return recorder.stop()
     }
 
@@ -258,7 +288,7 @@ final class AppController: ObservableObject {
         guard let s = session else { return }
         session = nil
         isRecording = false
-        _ = stopCapture(s)
+        stopCapture(s).discard()
         onStateChange?()
         if silent || !hud.isVisible { hud.hide() } else { flash(.notice("Cancelled"), sound: false) }
     }
@@ -272,8 +302,9 @@ final class AppController: ObservableObject {
         onStateChange?()
         if wasVisible { Sound.play(.stop) }
 
-        if rec.duration < 0.3 { hud.hide(); return }
+        if rec.duration < 0.3 { rec.discard(); hud.hide(); return }
         if rec.peak < 0.006 {
+            rec.discard()
             flash(.notice("Didn't hear anything — is the mic muted?"), sound: false)
             return
         }
@@ -282,90 +313,99 @@ final class AppController: ObservableObject {
         run(rec, s, releasedAt: Date())
     }
 
-    private func run(_ rec: Recording, _ s: Session, releasedAt: Date) {
+    enum Deliver { case paste, copy }
+
+    private func run(_ rec: Recording, _ s: Session, releasedAt: Date, pendingID: UUID? = nil, deliver: Deliver = .paste) {
         inFlight += 1
+        if let pendingID { retrying.insert(pendingID) }
         onStateChange?()
         Task { @MainActor in
-            defer { self.inFlight -= 1; self.onStateChange?() }
-            await self.process(rec, s, releasedAt: releasedAt)
+            defer {
+                self.inFlight -= 1
+                if let pendingID { self.retrying.remove(pendingID) }
+                self.onStateChange?()
+            }
+            await self.process(rec, s, releasedAt: releasedAt, pendingID: pendingID, deliver: deliver)
         }
     }
 
     private struct Outcome { var raw: String; var text: String; var mode: String; var engine: String }
 
-    private func process(_ rec: Recording, _ s: Session, releasedAt: Date) async {
-        var audioURL: URL?
+    private func process(_ rec: Recording, _ s: Session, releasedAt: Date, pendingID: UUID?, deliver: Deliver) async {
+        // The audio is done with: a fresh recording's temp folder, or a saved one that finally went through.
+        func done() { if let pendingID { pending.remove(pendingID) } else { rec.discard() } }
         do {
-            let url = try rec.writeCompressed()
-            audioURL = url
-
             var selection = s.focus.selectedText
             // AX couldn't see the field (common in Electron apps): read the selection via ⌘C.
-            if s.command, (selection ?? "").isEmpty, s.focus.role == nil, AXIsProcessTrusted(),
+            if pendingID == nil, s.command, (selection ?? "").isEmpty, s.focus.role == nil, AXIsProcessTrusted(),
                NSWorkspace.shared.frontmostApplication?.processIdentifier == s.focus.pid {
                 selection = await Paster.copySelection()
             }
 
             let out: Outcome
             switch prefs.engine {
-            case .cloud: out = try await viaCloud(url: url, rec: rec, s: s, selection: selection)
-            case .openAI, .apple: out = try await viaDirect(url: url, s: s, selection: selection)
+            case .cloud: out = try await viaCloud(rec: rec, s: s, selection: selection)
+            case .openAI, .apple: out = try await viaDirect(rec: rec, s: s, selection: selection)
             }
 
             let raw = out.raw.trimmingCharacters(in: .whitespacesAndNewlines)
             if raw.isEmpty || Hallucination.isLikely(raw, rec) {
-                try? FileManager.default.removeItem(at: url)
+                done()
                 flash(.notice("Didn't catch that"), sound: false)
                 return
             }
             var text = out.text.isEmpty ? raw : out.text
-            if !s.command { text = Spacing.join(text, after: s.focus.textBeforeCursor) }
+            if !s.command && deliver == .paste { text = Spacing.join(text, after: s.focus.textBeforeCursor) }
             guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                flash(.notice("Didn't catch that"), sound: false); return
+                done(); flash(.notice("Didn't catch that"), sound: false); return
             }
 
             // Debug runs (fake audio) only paste into TextEdit, so a test can never type into real work.
             let frontID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
             let debugUnsafe = s.fakeAudio != nil && frontID != "com.apple.TextEdit" && frontID != Bundle.main.bundleIdentifier
-            let pasted = debugUnsafe ? { Paster.copy(text); return false }() : insert(text)
+            let pasted = debugUnsafe || deliver == .copy ? { Paster.copy(text); return false }() : insert(text)
             let latency = Date().timeIntervalSince(releasedAt)
             history.add(Dictation(raw: raw, text: text.trimmingCharacters(in: .whitespaces), app: s.focus.appName,
                                   mode: out.mode, engine: out.engine, audioSeconds: rec.duration, latency: latency,
                                   bundleID: s.focus.bundleID))
-            try? FileManager.default.removeItem(at: url)
+            done()
             lastDictation = DictationEvent(locked: s.locked, command: s.command)
-            lastFailure = nil
-            canRetry = false
+            if pendingID == nil || lastFailure == pendingID { lastFailure = nil; canRetry = false }
             if !isRecording {
                 let words = text.split(whereSeparator: { $0.isWhitespace }).count
                 let what = pasted ? (out.mode == "command" ? "Replaced" : "\(words) word\(words == 1 ? "" : "s")") : "Copied — press ⌘V"
                 hud.show(.done("\(what) · \(String(format: "%.1f", latency))s"), autoHideAfter: pasted ? 1.1 : 2.5)
             }
         } catch {
-            if let audioURL { try? FileManager.default.removeItem(at: audioURL) }
             NSLog("Oneshot failed: \(error)")
+            // Keep the audio so nothing said is lost; it can be tried again from the HUD, the menu or History.
+            let message = Self.describe(error)
+            let savedID: UUID?
+            if let pendingID { pending.failedAgain(pendingID, error: message); savedID = pendingID }
+            else { savedID = pending.add(rec, focus: s.focus, command: s.command, error: message)?.id }
             if let e = error as? CloudError {
                 if e.status == 401 {
                     Account.shared.sessionExpired()
-                    flash(.error("Please sign in to Oneshot again"), sound: true, seconds: 3)
+                    flash(.error("Please sign in again. Your recording is saved in History."), sound: true, seconds: 4)
                     openSettings?("setup")
                     return
                 }
-                if e.code == "daily_limit" || e.code == "at_capacity" || e.code == "too_long" {
-                    flash(.error(e.localizedDescription), sound: true, seconds: 4)
+                if ["daily_limit", "at_capacity", "too_long", "update_required"].contains(e.code) {
+                    let saved = savedID != nil && e.code != "too_long" ? " Saved in History to try later." : ""
+                    flash(.error(e.localizedDescription + saved), sound: true, seconds: 5)
                     return
                 }
             }
-            lastFailure = (rec, s)
-            canRetry = true
-            flash(.error(Self.describe(error)), sound: true, seconds: 6, retry: true)
+            lastFailure = savedID
+            canRetry = savedID != nil
+            flash(.error(message), sound: true, seconds: 6, retry: savedID != nil)
         }
     }
 
     private var appleFallbackOK: Bool { prefs.offlineFallback && AppleTranscriber.status == .authorized }
 
     /// One request to the Oneshot server: it transcribes and cleans up.
-    private func viaCloud(url: URL, rec: Recording, s: Session, selection: String?) async throws -> Outcome {
+    private func viaCloud(rec: Recording, s: Session, selection: String?) async throws -> Outcome {
         let meta = DictateMeta(
             mode: s.command ? "command" : "dictate",
             durationSeconds: rec.duration,
@@ -377,20 +417,20 @@ final class AppController: ObservableObject {
             selection: s.command ? selection : nil,
             cleanup: prefs.cleanupEnabled)
         do {
-            let r = try await Account.shared.client.dictate(fileURL: url, meta: meta)
+            let r = try await Account.shared.client.dictate(fileURLs: rec.parts, meta: meta)
             Account.shared.update(usage: r.usage)
             onStateChange?()
             return Outcome(raw: r.raw, text: r.text, mode: r.mode, engine: "oneshot")
         } catch let e as URLError where appleFallbackOK && !s.command {
             NSLog("Oneshot: server unreachable (\(e.code.rawValue)), transcribing on-device")
-            let raw = try await apple.transcribe(url: url, language: prefs.language, vocabulary: prefs.vocabularyTerms)
+            let raw = try await appleTranscribe(rec.parts)
             return Outcome(raw: raw, text: raw, mode: "dictate", engine: "apple (offline fallback)")
         }
     }
 
     /// Own OpenAI key or on-device engine: transcribe here, then clean up with OpenAI if a key is set.
-    private func viaDirect(url: URL, s: Session, selection: String?) async throws -> Outcome {
-        let (raw0, engineName) = try await transcribe(url: url)
+    private func viaDirect(rec: Recording, s: Session, selection: String?) async throws -> Outcome {
+        let (raw0, engineName) = try await transcribe(parts: rec.parts)
         let raw = raw0.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty else { return Outcome(raw: "", text: "", mode: "dictate", engine: engineName) }
         let client = prefs.effectiveAPIKey.map { OpenAIClient(apiKey: $0) }
@@ -415,24 +455,45 @@ final class AppController: ObservableObject {
         return Outcome(raw: raw, text: text, mode: "dictate", engine: engineName)
     }
 
-    private func transcribe(url: URL) async throws -> (String, String) {
+    /// Transcribes every part (in parallel with OpenAI, in order on-device) and joins the text.
+    private func transcribe(parts: [URL]) async throws -> (String, String) {
         let vocab = prefs.vocabularyTerms
         if prefs.engine == .apple {
-            return (try await apple.transcribe(url: url, language: prefs.language, vocabulary: vocab), "apple")
+            return (try await appleTranscribe(parts), "apple")
         }
         guard let key = prefs.effectiveAPIKey else {
-            if appleFallbackOK { return (try await apple.transcribe(url: url, language: prefs.language, vocabulary: vocab), "apple") }
+            if appleFallbackOK { return (try await appleTranscribe(parts), "apple") }
             throw OneshotError.noAPIKey
         }
         do {
             let prompt = vocab.isEmpty ? nil : "Vocabulary: " + vocab.joined(separator: ", ")
-            let text = try await OpenAIClient(apiKey: key).transcribe(
-                fileURL: url, model: prefs.transcribeModel, prompt: prompt, language: prefs.language)
-            return (text, prefs.transcribeModel)
+            let client = OpenAIClient(apiKey: key)
+            let model = prefs.transcribeModel, language = prefs.language
+            let texts = try await withThrowingTaskGroup(of: (Int, String).self) { group -> [String] in
+                for (i, url) in parts.enumerated() {
+                    group.addTask {
+                        do { return (i, try await client.transcribe(fileURL: url, model: model, prompt: prompt, language: language)) }
+                        catch { return (i, try await client.transcribe(fileURL: url, model: model, prompt: prompt, language: language)) }  // one retry
+                    }
+                }
+                var out = Array(repeating: "", count: parts.count)
+                for try await (i, t) in group { out[i] = t }
+                return out
+            }
+            return (texts.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }.joined(separator: " "), prefs.transcribeModel)
         } catch let e as URLError where appleFallbackOK {
             NSLog("Oneshot: network error \(e.code.rawValue), falling back to on-device")
-            return (try await apple.transcribe(url: url, language: prefs.language, vocabulary: vocab), "apple (offline fallback)")
+            return (try await appleTranscribe(parts), "apple (offline fallback)")
         }
+    }
+
+    private func appleTranscribe(_ parts: [URL]) async throws -> String {
+        var texts: [String] = []
+        for url in parts {
+            let t = try await apple.transcribe(url: url, language: prefs.language, vocabulary: prefs.vocabularyTerms)
+            if !t.isEmpty { texts.append(t) }
+        }
+        return texts.joined(separator: " ")
     }
 
     @discardableResult

@@ -22,7 +22,7 @@ export async function transcribe(audio: File, opts: { prompt?: string; language?
     method: "POST",
     headers: { Authorization: `Bearer ${config.openaiKey}` },
     body: form,
-    signal: AbortSignal.timeout(60_000),
+    signal: AbortSignal.timeout(180_000),
   });
   return String((await check(res)).text ?? "");
 }
@@ -43,7 +43,7 @@ export async function chat(model: string, system: string, user: string, maxToken
     method: "POST",
     headers: { Authorization: `Bearer ${config.openaiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(45_000),
+    signal: AbortSignal.timeout(90_000),
   });
   return String((await check(res)).choices?.[0]?.message?.content ?? "");
 }

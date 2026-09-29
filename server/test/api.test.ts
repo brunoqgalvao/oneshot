@@ -53,9 +53,9 @@ afterAll(() => { proc?.kill(); mock.stop(true); rmSync(dir, { recursive: true, f
 const post = (path: string, body: unknown, token?: string) =>
   fetch(base + path, { method: "POST", headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(body) });
 
-function dictation(token: string, meta: Record<string, unknown>) {
+function dictation(token: string, meta: Record<string, unknown>, parts = 1) {
   const form = new FormData();
-  form.append("audio", new File([new Uint8Array(2000)], "a.m4a", { type: "audio/mp4" }));
+  for (let i = 0; i < parts; i++) form.append("audio", new File([new Uint8Array(2000)], `part-${i}.m4a`, { type: "audio/mp4" }));
   form.append("meta", JSON.stringify(meta));
   return fetch(base + "/v1/dictate", { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: form });
 }
@@ -106,6 +106,23 @@ test("command mode uses the command prompt", async () => {
   expect(body.mode).toBe("command");
   expect(body.text).toBe("Rewritten.");
   expect(lastChatUser).toContain("some text");
+});
+
+test("a long recording arrives in parts and is transcribed in order", async () => {
+  const res = await dictation(token, { durationSeconds: 2, cleanup: false }, 3);
+  expect(res.status).toBe(200);
+  const body: any = await res.json();
+  expect(body.raw).toBe(Array(3).fill("um so hello there uh new line thanks").join(" "));
+  expect(body.timings.parts).toBe(3);
+});
+
+test("recordings over 3 hours, and long unsplit files from old apps, are refused", async () => {
+  const tooLong = await dictation(token, { durationSeconds: 3 * 3600 + 120 }, 20);
+  expect(tooLong.status).toBe(413);
+  expect(((await tooLong.json()) as any).message).toContain("3 hours");
+  const unsplit = await dictation(token, { durationSeconds: 30 * 60 });
+  expect(unsplit.status).toBe(413);
+  expect(((await unsplit.json()) as any).error).toBe("update_required");
 });
 
 test("the daily free limit is enforced", async () => {

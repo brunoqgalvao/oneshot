@@ -83,3 +83,89 @@ extension JSONEncoder {
 extension JSONDecoder {
     static var iso: JSONDecoder { let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601; return d }
 }
+
+// MARK: - Recordings that didn't go through
+
+/// A recording that couldn't be transcribed. The audio stays on disk so it can be tried again later.
+struct PendingDictation: Codable, Identifiable, Equatable {
+    var id = UUID()
+    var date = Date()
+    var app: String?
+    var bundleID: String?
+    var command: Bool
+    var contextBefore: String?
+    var selection: String?
+    var duration: Double
+    var peak: Float
+    var parts: [String]       // file names inside the item's folder, in order
+    var error: String
+    var attempts = 1
+}
+
+final class PendingStore: ObservableObject {
+    static let shared = PendingStore()
+    static let maxItems = 20
+    @Published private(set) var items: [PendingDictation] = []
+    private let root = Secrets.dir.appendingPathComponent("pending", isDirectory: true)
+    private var index: URL { root.appendingPathComponent("pending.json") }
+
+    private init() {
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        if let data = try? Data(contentsOf: index),
+           let decoded = try? JSONDecoder.iso.decode([PendingDictation].self, from: data) {
+            // Drop entries whose audio is gone.
+            items = decoded.filter { p in p.parts.allSatisfy { FileManager.default.fileExists(atPath: folder(p.id).appendingPathComponent($0).path) } }
+        }
+    }
+
+    func folder(_ id: UUID) -> URL { root.appendingPathComponent(id.uuidString, isDirectory: true) }
+
+    /// Moves the recording's audio into permanent storage. Returns nil if there is no audio to keep.
+    @discardableResult
+    func add(_ rec: Recording, focus: FocusSnapshot, command: Bool, error: String) -> PendingDictation? {
+        guard !rec.parts.isEmpty else { return nil }
+        var p = PendingDictation(app: focus.appName, bundleID: focus.bundleID, command: command,
+                                 contextBefore: focus.textBeforeCursor, selection: focus.selectedText,
+                                 duration: rec.duration, peak: rec.peak, parts: [], error: error)
+        let dir = folder(p.id)
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            for url in rec.parts {
+                try FileManager.default.moveItem(at: url, to: dir.appendingPathComponent(url.lastPathComponent))
+                p.parts.append(url.lastPathComponent)
+            }
+        } catch {
+            NSLog("Oneshot: couldn't keep the failed recording: (error)")
+            try? FileManager.default.removeItem(at: dir)
+            return nil
+        }
+        rec.discard()
+        items.insert(p, at: 0)
+        while items.count > Self.maxItems { remove(items[items.count - 1].id) }
+        save()
+        return p
+    }
+
+    func recording(for p: PendingDictation) -> Recording {
+        Recording(parts: p.parts.map { folder(p.id).appendingPathComponent($0) }, duration: p.duration, peak: p.peak)
+    }
+
+    func item(_ id: UUID) -> PendingDictation? { items.first { $0.id == id } }
+
+    func failedAgain(_ id: UUID, error: String) {
+        guard let i = items.firstIndex(where: { $0.id == id }) else { return }
+        items[i].error = error
+        items[i].attempts += 1
+        save()
+    }
+
+    func remove(_ id: UUID) {
+        try? FileManager.default.removeItem(at: folder(id))
+        items.removeAll { $0.id == id }
+        save()
+    }
+
+    private func save() {
+        if let data = try? JSONEncoder.iso.encode(items) { try? data.write(to: index, options: .atomic) }
+    }
+}

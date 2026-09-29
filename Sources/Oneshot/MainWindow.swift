@@ -190,6 +190,7 @@ private struct HomePage: View {
     @ObservedObject private var controller = AppController.shared
     @ObservedObject private var account = Account.shared
     @ObservedObject private var updater = Updater.shared
+    @ObservedObject private var pending = PendingStore.shared
 
     private var greeting: String {
         let h = Calendar.current.component(.hour, from: Date())
@@ -217,6 +218,9 @@ private struct HomePage: View {
                 }
                 if prefs.engine == .cloud && !account.isSignedIn {
                     SignInBanner().staggerIn(2)
+                }
+                if !pending.items.isEmpty {
+                    PendingBanner(count: pending.items.count) { nav.page = .history }.staggerIn(2)
                 }
 
                 if history.items.isEmpty {
@@ -613,5 +617,27 @@ private struct StyleToggle: View {
             }
         }
         .toggleStyle(.switch)
+    }
+}
+
+/// Shown on Home while saved recordings are waiting to be tried again.
+private struct PendingBanner: View {
+    let count: Int
+    let open: () -> Void
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "waveform.badge.exclamationmark")
+                .font(.system(size: 16, weight: .semibold)).foregroundColor(.white)
+                .frame(width: 38, height: 38)
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.orange))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(count == 1 ? "1 recording didn't go through" : "\(count) recordings didn't go through").font(.system(size: 13.5, weight: .semibold))
+                Text("The audio is saved. Try it again whenever you like.").font(.system(size: 12)).foregroundColor(.secondary)
+            }
+            Spacer()
+            Button("Review", action: open).buttonStyle(SecondaryButtonStyle())
+        }
+        .padding(14)
+        .surface(radius: 14)
     }
 }

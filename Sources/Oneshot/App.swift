@@ -192,6 +192,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         case "stop": if controller.isRecording { controller.finish() }
         case "cancel": controller.cancelIfRecording()
         case "command": controller.startCommand()
+        case "retry":   // oneshot://retry tries the newest saved recording again
+            if let p = PendingStore.shared.items.first { controller.retry(p.id) }
         case "settings": showSettings(tab: path.count > 1 ? path[1] : "general", activate: !quiet)
         case "setup", "onboarding":
             let step = path.count > 1 ? OnboardingModel.Step.allCases.first { "\($0)" == path[1] } : nil
@@ -264,9 +266,10 @@ enum CLI {
             do {
                 let prefs = Prefs.shared
                 let rec = try Recording.load(url: URL(fileURLWithPath: path))
+                defer { rec.discard() }
                 let t0 = Date()
-                let file = try rec.writeCompressed()
-                let bytes = (try? FileManager.default.attributesOfItem(atPath: file.path)[.size] as? Int) ?? 0
+                guard let file = rec.parts.first else { throw OneshotError.noSpeech }
+                let bytes = rec.parts.reduce(0) { $0 + ((try? FileManager.default.attributesOfItem(atPath: $1.path)[.size] as? Int) ?? 0) }
                 let dest = Destination.classify(bundleID: bundleID, appName: bundleID, windowTitle: nil)
                 print("audio:     \(String(format: "%.1f", rec.duration))s -> \(file.pathExtension) \(bytes / 1024) KB, destination \(dest)")
                 if prefs.engine == .cloud {
@@ -274,7 +277,7 @@ enum CLI {
                     let meta = DictateMeta(mode: "dictate", durationSeconds: rec.duration, language: prefs.language,
                                            vocabulary: prefs.vocabularyTerms, destination: dest.rawValue, appName: bundleID,
                                            contextBefore: nil, selection: nil, cleanup: true)
-                    let r = try await Account.shared.client.dictate(fileURL: file, meta: meta)
+                    let r = try await Account.shared.client.dictate(fileURLs: rec.parts, meta: meta)
                     print("engine:    Oneshot server \(prefs.serverURL.absoluteString)")
                     print("raw:       \(r.raw)")
                     print("cleaned:   \(r.text)")

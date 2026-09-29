@@ -68,14 +68,55 @@ struct Cleaner {
     """
 
     func clean(raw: String, destination: Destination, appName: String?, contextBefore: String?, vocabulary: [String], model: String) async throws -> String {
+        // Long transcripts are cleaned in ~1,200 word pieces, in parallel; a piece that fails keeps its raw text.
+        let chunks = Self.split(raw, words: 1200)
+        if chunks.count > 1 {
+            let cleaned = await withTaskGroup(of: (Int, String).self) { group -> [String] in
+                for (i, chunk) in chunks.enumerated() {
+                    group.addTask {
+                        let ctx = i == 0 ? contextBefore : String(chunks[i - 1].suffix(600))
+                        let out = (try? await self.cleanOne(raw: chunk, destination: destination, appName: appName,
+                                                            contextBefore: ctx, vocabulary: vocabulary, model: model)) ?? ""
+                        return (i, out.isEmpty || Self.looksLikeDrift(raw: chunk, cleaned: out) ? chunk : out)
+                    }
+                }
+                var out = chunks
+                for await (i, s) in group { out[i] = s }
+                return out
+            }
+            return cleaned.joined(separator: "\n\n")
+        }
+        return try await cleanOne(raw: raw, destination: destination, appName: appName, contextBefore: contextBefore, vocabulary: vocabulary, model: model)
+    }
+
+    private func cleanOne(raw: String, destination: Destination, appName: String?, contextBefore: String?, vocabulary: [String], model: String) async throws -> String {
         var user = "Destination: \(appName ?? "unknown app") — \(destination.styleHint)\n"
         if !vocabulary.isEmpty { user += "Custom vocabulary (preferred spellings): \(vocabulary.joined(separator: ", "))\n" }
         if let ctx = contextBefore, !ctx.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             user += "Text already in the field right before the cursor (for continuity only; do NOT repeat it): <<<\(ctx)>>>\nContinue naturally from it: don't capitalize mid-sentence.\n"
         }
         user += "\nRaw transcript:\n<<<\(raw)>>>"
-        let out = try await client.chat(model: model, system: Self.dictationSystem, user: user)
+        let out = try await client.chat(model: model, system: Self.dictationSystem, user: user, maxTokens: 4000)
         return Self.strip(out)
+    }
+
+    /// Splits a transcript into pieces of about `words` words, ending on a sentence when possible.
+    static func split(_ raw: String, words: Int) -> [String] {
+        let tokens = raw.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        guard Double(tokens.count) > Double(words) * 1.25 else { return [raw] }
+        var out: [String] = []
+        var start = 0
+        while start < tokens.count {
+            var end = min(tokens.count, start + words)
+            if end < tokens.count {
+                for j in end..<min(tokens.count, end + 150) {
+                    if let last = tokens[j - 1].last, ".!?…".contains(last) { end = j; break }
+                }
+            }
+            out.append(tokens[start..<end].joined(separator: " "))
+            start = end
+        }
+        return out
     }
 
     func command(instruction: String, selection: String?, destination: Destination, appName: String?, model: String) async throws -> String {
