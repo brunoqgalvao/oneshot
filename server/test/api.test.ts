@@ -120,7 +120,7 @@ test("recordings over 3 hours, and long unsplit files from old apps, are refused
   const tooLong = await dictation(token, { durationSeconds: 3 * 3600 + 120 }, 20);
   expect(tooLong.status).toBe(413);
   expect(((await tooLong.json()) as any).message).toContain("3 hours");
-  const unsplit = await dictation(token, { durationSeconds: 30 * 60 });
+  const unsplit = await dictation(token, { durationSeconds: 7 * 60 });
   expect(unsplit.status).toBe(413);
   expect(((await unsplit.json()) as any).error).toBe("update_required");
 });

@@ -74,7 +74,8 @@ struct Cleaner {
             let cleaned = await withTaskGroup(of: (Int, String).self) { group -> [String] in
                 for (i, chunk) in chunks.enumerated() {
                     group.addTask {
-                        let ctx = i == 0 ? contextBefore : String(chunks[i - 1].suffix(600))
+                        // Only the first piece continues the text in the field; later pieces start on a new sentence.
+                        let ctx = i == 0 ? contextBefore : nil
                         let out = (try? await self.cleanOne(raw: chunk, destination: destination, appName: appName,
                                                             contextBefore: ctx, vocabulary: vocabulary, model: model)) ?? ""
                         return (i, out.isEmpty || Self.looksLikeDrift(raw: chunk, cleaned: out) ? chunk : out)

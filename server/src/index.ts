@@ -101,9 +101,9 @@ async function dictate(req: Request, user: User) {
   if (seconds > config.maxAudioSeconds + 30) {
     return fail(413, "too_long", `Recordings are limited to ${Math.round(config.maxAudioSeconds / 3600)} hours.`);
   }
-  // Older apps send one unsplit file; OpenAI can't take more than ~25 minutes in one piece.
+  // Older apps send one unsplit file; OpenAI truncates long single pieces.
   if (parts.length === 1 && seconds > config.maxPartSeconds) {
-    return fail(413, "update_required", "Update Oneshot to dictate for longer than 20 minutes.");
+    return fail(413, "update_required", "Update Oneshot to dictate for longer than 6 minutes.");
   }
   const used = Usage.userSeconds(user.id);
   if (used + seconds > config.freeDailySeconds) {
@@ -116,7 +116,18 @@ async function dictate(req: Request, user: User) {
   const vocabulary = (meta.vocabulary ?? []).map(String).slice(0, 100);
   const t0 = performance.now();
   const prompt = vocabulary.length ? "Vocabulary: " + vocabulary.join(", ") : undefined;
-  const pieces = await mapLimit(parts, 8, (p) => withRetry(() => transcribe(p, { prompt, language: meta.language })));
+  const pieces = await mapLimit(parts, 12, async (p) => {
+    const once = () => withRetry(() => transcribe(p, { prompt, language: meta.language }));
+    const first = await once();
+    // gpt-4o-transcribe occasionally returns only a fragment of a part, with no error.
+    // AAC at 24 kbps is ~3 KB/s; if a part with real length came back nearly empty, try once more.
+    const seconds = p.size / 3000;
+    if (parts.length > 1 && seconds > 15 && wordCount(first) < seconds * 0.6) {
+      const second = await once().catch(() => "");
+      return wordCount(second) > wordCount(first) ? second : first;
+    }
+    return first;
+  });
   const raw = pieces.map((t) => t.trim()).filter(Boolean).join(" ");
   const t1 = performance.now();
   Usage.add(user.id, seconds);
@@ -134,7 +145,8 @@ async function dictate(req: Request, user: User) {
       try {
         const cleaned = strip(await chat(config.cleanupModel, dictationSystem, dictationUser({
           raw: chunk, destination: meta.destination, appName: meta.appName,
-          contextBefore: i === 0 ? meta.contextBefore?.slice(-600) : chunks[i - 1].slice(-600), vocabulary,
+          // Only the first piece continues the text in the field; later pieces start on a new sentence.
+          contextBefore: i === 0 ? meta.contextBefore?.slice(-600) : undefined, vocabulary,
         }), 4000));
         return cleaned && !looksLikeDrift(chunk, cleaned) ? cleaned : chunk;
       } catch (e) {
@@ -153,6 +165,8 @@ async function dictate(req: Request, user: User) {
 }
 
 /** Runs `fn` over `items` with at most `limit` in flight, keeping order. */
+const wordCount = (s: string) => s.split(/\s+/).filter(Boolean).length;
+
 async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
   const out = new Array<R>(items.length);
   let next = 0;

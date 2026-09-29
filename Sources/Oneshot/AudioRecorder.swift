@@ -22,7 +22,7 @@ enum OneshotError: LocalizedError {
     }
 }
 
-/// A finished recording: compressed audio on disk, split into parts of up to 10 minutes
+/// A finished recording: compressed audio on disk, split into parts of up to 5 minutes
 /// so a 3-hour dictation never sits in memory and each part fits OpenAI's upload limits.
 struct Recording {
     static let maxDuration: Double = 3 * 3600
@@ -53,15 +53,24 @@ struct Recording {
         var peak: Float = 0
         if let ch = out.floatChannelData?[0] { for i in 0..<n { peak = max(peak, abs(ch[i])) } }
         let writer = try SegmentWriter()
-        try writer.append(out)
+        // Feed it in microphone-sized buffers so parts split at pauses, like a live recording.
+        var offset = 0
+        while offset < n, let src = out.floatChannelData?[0] {
+            let count = min(4096, n - offset)
+            guard let slice = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: AVAudioFrameCount(count)), let dst = slice.floatChannelData?[0] else { break }
+            slice.frameLength = AVAudioFrameCount(count)
+            dst.update(from: src.advanced(by: offset), count: count)
+            try writer.append(slice)
+            offset += count
+        }
         return Recording(parts: writer.finish(), duration: Double(n) / 16_000, peak: peak)
     }
 }
 
-/// Streams 16 kHz mono audio to AAC files (m4a, ~3 KB/s), starting a new file every 10 minutes.
+/// Streams 16 kHz mono audio to AAC files (m4a, ~3 KB/s), starting a new file every 5 minutes.
 /// Falls back to 16-bit WAV if the AAC encoder is unavailable.
 final class SegmentWriter {
-    static let partSeconds: Double = 600
+    static let partSeconds: Double = 300   // gpt-4o-transcribe truncates its answer on ~8+ minutes of fast speech
     let folder: URL
     private(set) var parts: [URL] = []
     private(set) var totalFrames: Int64 = 0
@@ -77,7 +86,10 @@ final class SegmentWriter {
     }
 
     func append(_ buffer: AVAudioPCMBuffer) throws {
-        let capacity = Int64(Self.partSeconds * 16_000)
+        let soft = Int64(Self.partSeconds * 16_000)
+        let capacity = soft + 30 * 16_000   // hard cut 30 s later if nobody pauses
+        // Past the 5-minute mark, start the next part at the first quiet buffer, so words aren't cut in half.
+        if file != nil, framesInPart >= soft, framesInPart < capacity, Self.isQuiet(buffer) { try startPart() }
         var offset: AVAudioFrameCount = 0
         while offset < buffer.frameLength {
             if file == nil || framesInPart >= capacity { try startPart() }
@@ -96,6 +108,13 @@ final class SegmentWriter {
             framesInPart += Int64(count)
             totalFrames += Int64(count)
         }
+    }
+
+    private static func isQuiet(_ buffer: AVAudioPCMBuffer) -> Bool {
+        guard let ch = buffer.floatChannelData?[0], buffer.frameLength > 0 else { return false }
+        var sum: Float = 0
+        for i in 0..<Int(buffer.frameLength) { sum += ch[i] * ch[i] }
+        return sqrt(sum / Float(buffer.frameLength)) < 0.01   // about -40 dBFS
     }
 
     /// Closes the current file and returns every part in order.

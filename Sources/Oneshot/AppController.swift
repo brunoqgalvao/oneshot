@@ -472,8 +472,19 @@ final class AppController: ObservableObject {
             let texts = try await withThrowingTaskGroup(of: (Int, String).self) { group -> [String] in
                 for (i, url) in parts.enumerated() {
                     group.addTask {
-                        do { return (i, try await client.transcribe(fileURL: url, model: model, prompt: prompt, language: language)) }
-                        catch { return (i, try await client.transcribe(fileURL: url, model: model, prompt: prompt, language: language)) }  // one retry
+                        func once() async throws -> String {
+                            do { return try await client.transcribe(fileURL: url, model: model, prompt: prompt, language: language) }
+                            catch { return try await client.transcribe(fileURL: url, model: model, prompt: prompt, language: language) }  // one retry
+                        }
+                        let first = try await once()
+                        // gpt-4o-transcribe occasionally returns only a fragment of a part; ~3 KB/s of AAC per second of audio.
+                        let seconds = Double((try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0) / 3000
+                        let words = { (s: String) in s.split(whereSeparator: { $0.isWhitespace }).count }
+                        if parts.count > 1, seconds > 15, Double(words(first)) < seconds * 0.6,
+                           let second = try? await once(), words(second) > words(first) {
+                            return (i, second)
+                        }
+                        return (i, first)
                     }
                 }
                 var out = Array(repeating: "", count: parts.count)

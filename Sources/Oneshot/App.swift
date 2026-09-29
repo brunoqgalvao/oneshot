@@ -267,11 +267,19 @@ enum CLI {
                 let prefs = Prefs.shared
                 let rec = try Recording.load(url: URL(fileURLWithPath: path))
                 defer { rec.discard() }
+                if CommandLine.arguments.contains("--keep-parts") {
+                    // Copies the split parts into the current folder, for testing the server by hand.
+                    for url in rec.parts {
+                        let dest = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent(url.lastPathComponent)
+                        try? FileManager.default.removeItem(at: dest)
+                        try FileManager.default.copyItem(at: url, to: dest)
+                    }
+                }
                 let t0 = Date()
                 guard let file = rec.parts.first else { throw OneshotError.noSpeech }
                 let bytes = rec.parts.reduce(0) { $0 + ((try? FileManager.default.attributesOfItem(atPath: $1.path)[.size] as? Int) ?? 0) }
                 let dest = Destination.classify(bundleID: bundleID, appName: bundleID, windowTitle: nil)
-                print("audio:     \(String(format: "%.1f", rec.duration))s -> \(file.pathExtension) \(bytes / 1024) KB, destination \(dest)")
+                print("audio:     \(String(format: "%.1f", rec.duration))s -> \(rec.parts.count) \(file.pathExtension) part(s), \(bytes / 1024) KB, destination \(dest)")
                 if prefs.engine == .cloud {
                     guard Account.shared.isSignedIn else { throw CloudError.server(status: 401, code: "unauthorized", message: "Run --login first") }
                     let meta = DictateMeta(mode: "dictate", durationSeconds: rec.duration, language: prefs.language,
