@@ -143,8 +143,11 @@ export function stats(days = 30) {
   const chatPerRequest = (1200 * config.price.chatInputPerM + 250 * config.price.chatOutputPerM) / 1e6;
   for (const d of byDay.values()) {
     const s = tracked.get(d.day);
-    if (s) d.usd = s.usd;
-    else if (d.minutes > 0) { d.usd = d.minutes * config.price.transcribePerMinute + d.requests * chatPerRequest; d.estimated = true; }
+    const estimate = d.minutes * config.price.transcribePerMinute + d.requests * chatPerRequest;
+    // Tracking started mid-day: add an estimate for the minutes it didn't see.
+    const untracked = d.minutes > 0 ? Math.max(0, 1 - (s?.audio_seconds ?? 0) / 60 / d.minutes) : 0;
+    d.usd = (s?.usd ?? 0) + estimate * untracked;
+    d.estimated = untracked > 0.05;
   }
   const list = [...byDay.values()];
   const sum = (xs: any[]) => ({
