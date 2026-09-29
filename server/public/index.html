@@ -37,6 +37,12 @@
   .btn.ghost { background:var(--card); border:1px solid var(--line); }
   .install { margin:26px auto 0; display:inline-flex; align-items:center; gap:12px; padding:10px 10px 10px 16px; border-radius:12px; background:#1b191e; color:#e9e6ee; font:14px ui-monospace, "SF Mono", Menlo, monospace; }
   .install button { border:0; border-radius:8px; padding:7px 11px; background:#2c2931; color:#fff; font:600 12px system-ui; cursor:pointer; }
+  .install-label { font-size:13px; font-weight:600; color:var(--muted); margin-top:28px; } .install-label + .install { margin-top:8px; }
+  .install.big { margin-top:10px; padding:12px 12px 12px 20px; font-size:15px; box-shadow:0 10px 28px rgba(20,18,22,.22); }
+  .install.big button { background:var(--accent, #EE4D29); padding:8px 14px; font-size:13px; }
+  .ctas.alt { margin-top:26px; }
+  .ctas.alt .btn { padding:10px 16px; font-size:14px; }
+  .meta.note { max-width:460px; margin:10px auto 0; }
   .meta { font-size:13px; color:var(--muted); margin-top:12px; }
   .stage { margin:56px auto 0; max-width:760px; border-radius:22px; overflow:hidden; background:#111; box-shadow:0 30px 80px rgba(20,18,22,.25), 0 0 0 1px rgba(255,255,255,.04) inset; }
   .stage video { display:block; width:100%; }
@@ -76,8 +82,9 @@
       <a class="btn primary" href="https://github.com/brunoqgalvao/oneshot/releases/latest/download/Oneshot.zip">Download for Mac</a>
       <a class="btn ghost" href="https://github.com/brunoqgalvao/oneshot">★ Star on GitHub</a>
     </div>
-    <div class="install"><span>curl -fsSL https://oneshot.agenturl.dev/install.sh | sh</span><button onclick="navigator.clipboard.writeText('curl -fsSL https://oneshot.agenturl.dev/install.sh | sh');this.textContent='Copied'">Copy</button></div>
-    <div class="meta">macOS 13+ · Apple silicon · 30 free minutes a day, or bring your own OpenAI key</div>
+    <div class="meta">macOS 13+ · Apple silicon · Signed and notarized by Apple · 30 free minutes a day, or bring your own OpenAI key</div>
+    <div class="install-label">Or install from Terminal</div>
+    <div class="install"><span>curl -fsSL https://oneshot.agenturl.dev/install.sh | sh</span><button onclick="navigator.clipboard.writeText('curl -fsSL https://oneshot.agenturl.dev/install.sh | sh');this.textContent='Copied ✓';setTimeout(()=>this.textContent='Copy',1600)">Copy</button></div>
     <div class="stage"><video src="/demo.mp4" autoplay muted loop playsinline></video></div>
   </header>
 

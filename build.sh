@@ -20,23 +20,37 @@ echo "Server: $SERVER_URL"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 cp Resources/google-g.png "$APP/Contents/Resources/google-g.png"
 
-[ -f .signing/murmur.keychain-db ] || ./scripts/make_signing_identity.sh || true
-KC="$PWD/.signing/murmur.keychain-db"
-signed=0
-if [ -f "$KC" ] && security unlock-keychain -p murmur-local "$KC" 2>/dev/null; then
-  # codesign only searches keychains on the user search list: add ours just for this call.
-  orig=()
+# Keychains used for signing: a Developer ID one (for public releases) or a stable local one.
+with_keychain() { # with_keychain <keychain> <password> <command...>
+  local kc="$1" pw="$2"; shift 2
+  security unlock-keychain -p "$pw" "$kc" 2>/dev/null || return 1
+  local orig=()
   while IFS= read -r line; do orig+=("$(echo "$line" | sed -e 's/^ *"//' -e 's/"$//')"); done < <(security list-keychains -d user)
-  security list-keychains -d user -s "${orig[@]}" "$KC"
-  codesign --force --sign "Murmur Local Signing" --identifier fm.oneshot.app "$APP" 2>/dev/null && signed=1
+  security list-keychains -d user -s "${orig[@]}" "$kc"
+  local rc=0; "$@" || rc=$?
   security list-keychains -d user -s "${orig[@]}"
+  return $rc
+}
+DEVID_KC="$PWD/.signing/devid/devid.keychain-db"
+LOCAL_KC="$PWD/.signing/murmur.keychain-db"
+signed=""
+if [ -f "$DEVID_KC" ]; then
+  DEVID=$(security find-identity -p codesigning "$DEVID_KC" | grep -o '"Developer ID Application[^"]*"' | head -1 | tr -d '"')
+  if [ -n "$DEVID" ] && with_keychain "$DEVID_KC" oneshot-devid codesign --force --timestamp --options runtime       --entitlements Resources/Oneshot.entitlements --identifier fm.oneshot.app --sign "$DEVID" "$APP"; then
+    signed="$DEVID"
+  fi
 fi
-if [ $signed = 1 ]; then
-  echo "Signed with stable local identity"
-else
-  codesign --force --sign - --identifier fm.oneshot.app "$APP"
-  echo "Signed ad-hoc (permissions will need re-granting after each rebuild)"
+if [ -z "$signed" ]; then
+  [ -f "$LOCAL_KC" ] || ./scripts/make_signing_identity.sh || true
+  if [ -f "$LOCAL_KC" ] && with_keychain "$LOCAL_KC" murmur-local codesign --force --sign "Murmur Local Signing"       --identifier fm.oneshot.app "$APP" 2>/dev/null; then
+    signed="Murmur Local Signing"
+  else
+    codesign --force --sign - --identifier fm.oneshot.app "$APP"
+    signed="ad-hoc (permissions will need re-granting after each rebuild)"
+  fi
 fi
+echo "Signed: $signed"
+echo "$signed" > build/.signed-with
 
 echo "Built $PWD/$APP"
 if [ "${1:-}" = "--open" ]; then
