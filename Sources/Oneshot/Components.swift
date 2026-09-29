@@ -267,7 +267,7 @@ struct UsageBar: View {
                 }
             }
             .frame(height: 6)
-            Text("\(usage.remainingMinutes) of \(usage.limitMinutes) free minutes left today")
+            Text("\(usage.remainingMinutes) of \(usage.limitMinutes) free minutes left \(usage.periodLabel)")
                 .font(.system(size: 11).monospacedDigit())
                 .foregroundColor(.secondary)
         }
@@ -369,7 +369,7 @@ struct AccountForm: View {
                     .foregroundColor(.red)
                     .transition(.opacity.combined(with: .move(edge: .top)))
             } else if create {
-                Text("Free: \(30) minutes of dictation a day. No API key needed.")
+                Text("Free: 30 minutes of dictation a week. No API key needed.")
                     .font(.system(size: 11)).foregroundColor(.secondary)
             }
         }

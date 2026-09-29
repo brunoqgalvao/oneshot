@@ -1,4 +1,5 @@
 import { config } from "./config";
+import { Spend } from "./db";
 
 export class UpstreamError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -45,5 +46,7 @@ export async function chat(model: string, system: string, user: string, maxToken
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(90_000),
   });
-  return String((await check(res)).choices?.[0]?.message?.content ?? "");
+  const data = await check(res);
+  Spend.tokens(Number(data.usage?.prompt_tokens) || 0, Number(data.usage?.completion_tokens) || 0);
+  return String(data.choices?.[0]?.message?.content ?? "");
 }

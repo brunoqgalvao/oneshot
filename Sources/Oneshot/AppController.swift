@@ -399,7 +399,7 @@ final class AppController: ObservableObject {
                     openSettings?("setup")
                     return
                 }
-                if ["daily_limit", "at_capacity", "too_long", "update_required"].contains(e.code) {
+                if ["daily_limit", "weekly_limit", "at_capacity", "too_long", "update_required"].contains(e.code) {
                     let saved = savedID != nil && e.code != "too_long" ? " Saved in History to try later." : ""
                     flash(.error(e.localizedDescription + saved), sound: true, seconds: 5)
                     return

@@ -1,10 +1,11 @@
 import { config } from "./config";
-import { Sessions, Usage, Users, today, type User } from "./db";
+import { Sessions, Spend, Usage, Users, stats, today, weekBounds, type User } from "./db";
 import { allow } from "./limits";
 import { chat, transcribe, UpstreamError } from "./openai";
 import * as google from "./google";
 import { Feedback, publicView, STATUSES, type Status } from "./feedback";
 import { commandSystem, commandUser, dictationSystem, dictationUser, looksLikeDrift, strip } from "./prompts";
+import { adminPage } from "./admin";
 
 if (!config.openaiKey) {
   console.error("OPENAI_API_KEY is required");
@@ -25,7 +26,13 @@ function clientIP(req: Request, server: Bun.Server) {
 }
 
 function usageOf(user: User) {
-  return { usedSeconds: Math.round(Usage.userSeconds(user.id)), limitSeconds: config.freeDailySeconds, resetsAt: `${today()}T24:00:00Z` };
+  // The client shows one bar; when both caps are on, show whichever is tighter right now.
+  const week = weekBounds();
+  const weekly = { period: "week", usedSeconds: Math.round(Usage.userSecondsSince(user.id, week.start)), limitSeconds: config.freeWeeklySeconds, resetsAt: week.resetsAt };
+  const daily = { period: "day", usedSeconds: Math.round(Usage.userSeconds(user.id)), limitSeconds: config.freeDailySeconds, resetsAt: `${today()}T24:00:00Z` };
+  if (!config.freeWeeklySeconds) return daily;
+  if (!config.freeDailySeconds) return weekly;
+  return daily.limitSeconds - daily.usedSeconds < weekly.limitSeconds - weekly.usedSeconds ? daily : weekly;
 }
 
 function authed(req: Request) {
@@ -105,9 +112,11 @@ async function dictate(req: Request, user: User) {
   if (parts.length === 1 && seconds > config.maxPartSeconds) {
     return fail(413, "update_required", "Update Oneshot to dictate for longer than 6 minutes.");
   }
-  const used = Usage.userSeconds(user.id);
-  if (used + seconds > config.freeDailySeconds) {
-    return json({ error: "daily_limit", message: `You've used today's free ${Math.round(config.freeDailySeconds / 60)} minutes. It resets at midnight UTC.`, usage: usageOf(user) }, 429);
+  if (config.freeWeeklySeconds && Usage.userSecondsSince(user.id, weekBounds().start) + seconds > config.freeWeeklySeconds) {
+    return json({ error: "weekly_limit", message: `That would go past this week's free ${Math.round(config.freeWeeklySeconds / 60)} minutes. They reset on Monday. You can also add your own OpenAI key in Settings.`, usage: usageOf(user) }, 429);
+  }
+  if (config.freeDailySeconds && Usage.userSeconds(user.id) + seconds > config.freeDailySeconds) {
+    return json({ error: "daily_limit", message: `That would go past today's free ${Math.round(config.freeDailySeconds / 60)} minutes. They reset at midnight UTC.`, usage: usageOf(user) }, 429);
   }
   if (Usage.globalSeconds() + seconds > config.globalDailySeconds) {
     return fail(503, "at_capacity", "Oneshot's free tier is at capacity for today. Try again tomorrow.");
@@ -117,12 +126,14 @@ async function dictate(req: Request, user: User) {
   const t0 = performance.now();
   const prompt = vocabulary.length ? "Vocabulary: " + vocabulary.join(", ") : undefined;
   const pieces = await mapLimit(parts, 12, async (p) => {
-    const once = () => withRetry(() => transcribe(p, { prompt, language: meta.language }));
+    // Every call to OpenAI is counted in the spend log, retries included.
+    const partSeconds = seconds * (p.size / bytes);
+    const once = () => withRetry(async () => { const t = await transcribe(p, { prompt, language: meta.language }); Spend.audio(partSeconds); return t; });
     const first = await once();
     // gpt-4o-transcribe occasionally returns only a fragment of a part, with no error.
     // AAC at 24 kbps is ~3 KB/s; if a part with real length came back nearly empty, try once more.
-    const seconds = p.size / 3000;
-    if (parts.length > 1 && seconds > 15 && wordCount(first) < seconds * 0.6) {
+    const aacSeconds = p.size / 3000;
+    if (parts.length > 1 && aacSeconds > 15 && wordCount(first) < aacSeconds * 0.6) {
       const second = await once().catch(() => "");
       return wordCount(second) > wordCount(first) ? second : first;
     }
@@ -325,6 +336,8 @@ const server = Bun.serve({
         }
       }
       if (url.pathname === "/admin/feedback" || url.pathname.startsWith("/admin/feedback/")) return await adminFeedback(req, url);
+      if (route === "GET /admin") return html(adminPage);
+      if (route === "GET /admin/stats") return isAdmin(req) ? json(stats(30)) : fail(401, "unauthorized", "Admin only.");
       const auth = authed(req);
       if (!auth) return fail(401, "unauthorized", "Please sign in again.");
       switch (route) {

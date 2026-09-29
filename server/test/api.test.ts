@@ -36,7 +36,7 @@ beforeAll(async () => {
   proc = Bun.spawn(["bun", "src/index.ts"], {
     cwd: join(import.meta.dir, ".."),
     env: { ...process.env, PORT: String(port), OPENAI_API_KEY: "test", OPENAI_BASE_URL: `http://127.0.0.1:${mock.port}`,
-      DATABASE_PATH: join(dir, "t.db"), FREE_DAILY_SECONDS: "10",
+      DATABASE_PATH: join(dir, "t.db"), FREE_WEEKLY_SECONDS: "10",
       PUBLIC_URL: base, ADMIN_TOKEN: "a".repeat(40), GOOGLE_CLIENT_ID: "test-client", GOOGLE_CLIENT_SECRET: "secret",
       GOOGLE_AUTH_URL: `http://127.0.0.1:${mock.port}/auth`, GOOGLE_TOKEN_URL: `http://127.0.0.1:${mock.port}/token` },
     stdout: "ignore", stderr: "inherit",
@@ -125,10 +125,24 @@ test("recordings over 3 hours, and long unsplit files from old apps, are refused
   expect(((await unsplit.json()) as any).error).toBe("update_required");
 });
 
-test("the daily free limit is enforced", async () => {
+test("the weekly free limit is enforced", async () => {
   const res = await dictation(token, { durationSeconds: 6 });
   expect(res.status).toBe(429);
-  expect(((await res.json()) as any).error).toBe("daily_limit");
+  const body: any = await res.json();
+  expect(body.error).toBe("weekly_limit");
+  expect(body.usage.period).toBe("week");
+  expect(new Date(body.usage.resetsAt).getUTCDay()).toBe(1);   // next Monday
+});
+
+test("admin stats track spend and need the admin token", async () => {
+  expect((await fetch(base + "/admin/stats")).status).toBe(401);
+  expect((await fetch(base + "/admin")).status).toBe(200);
+  const s: any = await (await fetch(base + "/admin/stats", { headers: { Authorization: "Bearer " + "a".repeat(40) } })).json();
+  expect(s.today.minutes).toBeGreaterThan(0);
+  expect(s.today.usd).toBeGreaterThan(0);
+  expect(s.days.length).toBe(30);
+  expect(s.topUsersThisWeek[0].email).toBe("bruno@example.com");
+  expect(s.limits.freeWeeklyMinutes).toBeCloseTo(10 / 60);
 });
 
 test("logout revokes the token", async () => {

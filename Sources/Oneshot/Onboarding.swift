@@ -275,7 +275,7 @@ private struct AccountStep: View {
         StepScaffold(title: prefs.engine == .openAI ? "Add your OpenAI key" : "Create your free account",
                      subtitle: prefs.engine == .openAI
                         ? "Oneshot calls OpenAI directly with your key. Usage is billed to your OpenAI account."
-                        : "Oneshot's server does the transcription, so there's no API key to set up. 30 free minutes every day.") {
+                        : "Oneshot's server does the transcription, so there's no API key to set up. 30 free minutes every week.") {
             SymbolTile(symbol: prefs.engine == .openAI ? "key.fill" : "person.crop.circle.fill")
         } content: {
             Group {

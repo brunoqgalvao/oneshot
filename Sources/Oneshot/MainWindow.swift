@@ -465,7 +465,7 @@ private struct SignInBanner: View {
                 .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Brand.gradient))
             VStack(alignment: .leading, spacing: 2) {
                 Text("Create your free account to start dictating").font(.system(size: 13.5, weight: .semibold))
-                Text("30 minutes a day, no API key needed. Takes ten seconds.").font(.system(size: 12)).foregroundColor(.secondary)
+                Text("30 free minutes a week, no API key needed. Takes ten seconds.").font(.system(size: 12)).foregroundColor(.secondary)
             }
             Spacer()
             Button("Get started") { AppDelegate.shared?.showOnboarding(step: .account) }

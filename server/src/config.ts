@@ -3,8 +3,16 @@ export const config = {
   openaiKey: process.env.OPENAI_API_KEY ?? "",
   openaiBase: process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1",
   databasePath: process.env.DATABASE_PATH ?? "./data/murmur.db",
-  freeDailySeconds: Number(process.env.FREE_DAILY_SECONDS ?? 1800),
+  /** Free allowance. Weekly (Monday to Sunday, UTC) by default; a daily cap can be added with FREE_DAILY_SECONDS. 0 turns a cap off. */
+  freeWeeklySeconds: Number(process.env.FREE_WEEKLY_SECONDS ?? 1800),
+  freeDailySeconds: Number(process.env.FREE_DAILY_SECONDS ?? 0),
   globalDailySeconds: Number(process.env.GLOBAL_DAILY_SECONDS ?? 36000),
+  /** OpenAI list prices, for the spend estimate. */
+  price: {
+    transcribePerMinute: Number(process.env.PRICE_TRANSCRIBE_PER_MIN ?? 0.006),
+    chatInputPerM: Number(process.env.PRICE_CHAT_IN_PER_M ?? 0.75),
+    chatOutputPerM: Number(process.env.PRICE_CHAT_OUT_PER_M ?? 4.5),
+  },
   /** Longest single dictation. The app splits recordings into 5-minute parts. */
   maxAudioSeconds: Number(process.env.MAX_AUDIO_SECONDS ?? 3 * 3600),
   /** Whole request (3 h of 24 kbps AAC is ~33 MB). */

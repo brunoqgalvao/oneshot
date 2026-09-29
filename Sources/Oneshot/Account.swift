@@ -16,8 +16,12 @@ enum CloudError: LocalizedError {
 struct CloudUsage: Codable, Equatable {
     var usedSeconds: Double
     var limitSeconds: Double
+    /// "week" or "day" (older servers don't send it: daily).
+    var period: String? = nil
+    var resetsAt: String? = nil
     var remainingMinutes: Int { max(0, Int(((limitSeconds - usedSeconds) / 60).rounded(.down))) }
     var limitMinutes: Int { Int((limitSeconds / 60).rounded()) }
+    var periodLabel: String { period == "week" ? "this week" : "today" }
 }
 
 struct DictateMeta: Encodable {
