@@ -16,8 +16,41 @@ enum Brand {
     /// Critically damped springs (no bounce), interruptible.
     static let spring = Animation.spring(response: 0.34, dampingFraction: 1)
     static let quick = Animation.spring(response: 0.22, dampingFraction: 1)
+    /// Strong ease-out (Craft: cubic-bezier(0.23, 1, 0.32, 1)) for anything the user triggers.
+    static func easeOut(_ duration: Double) -> Animation { .timingCurve(0.23, 1, 0.32, 1, duration: duration) }
+    /// Button press: short, transform only.
+    static let press = easeOut(0.1)
+    /// Title tracking for display sizes (about -0.02em).
+    static func tracking(_ size: CGFloat) -> CGFloat { -0.02 * size }
 
     static var reduceMotion: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+}
+
+// MARK: - Surfaces
+
+/// Card surface: the edge is a layered shadow ring, not a border, so stacked surfaces never pile up lines.
+struct Surface: ViewModifier {
+    var radius: CGFloat = 14
+    var fill: Color = Color(nsColor: .controlBackgroundColor)
+    @Environment(\.colorScheme) private var scheme
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        let dark = scheme == .dark
+        return content
+            .background(
+                shape.fill(fill)
+                    .shadow(color: .black.opacity(dark ? 0.1 : 0.06), radius: 1, y: 1)   // contact
+                    .shadow(color: .black.opacity(dark ? 0.1 : 0.04), radius: 4, y: 2)   // ambient
+            )
+            .overlay(shape.strokeBorder(dark ? Color.white.opacity(0.06) : Color.black.opacity(0.06), lineWidth: 1)) // ring
+    }
+}
+
+extension View {
+    func surface(radius: CGFloat = 14, fill: Color = Color(nsColor: .controlBackgroundColor)) -> some View {
+        modifier(Surface(radius: radius, fill: fill))
+    }
 }
 
 // MARK: - Buttons
@@ -42,8 +75,8 @@ struct PrimaryButtonStyle: ButtonStyle {
                     .strokeBorder(LinearGradient(colors: [.white.opacity(0.28), .white.opacity(0)], startPoint: .top, endPoint: .bottom), lineWidth: 1)
             )
             .shadow(color: tint.opacity(enabled ? 0.28 : 0), radius: configuration.isPressed ? 2 : 6, y: configuration.isPressed ? 1 : 3)
-            .scaleEffect(configuration.isPressed ? 0.96 : 1)
-            .animation(Brand.quick, value: configuration.isPressed)
+            .scaleEffect(configuration.isPressed && enabled ? 0.97 : 1)
+            .animation(Brand.press, value: configuration.isPressed)
             .contentShape(Rectangle())
     }
 }
@@ -56,19 +89,20 @@ struct SecondaryButtonStyle: ButtonStyle {
             .padding(.horizontal, 14)
             .frame(minHeight: 32)
             .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.primary.opacity(hover ? 0.1 : 0.06)))
-            .scaleEffect(configuration.isPressed ? 0.96 : 1)
-            .animation(Brand.quick, value: configuration.isPressed)
-            .onHover { h in withAnimation(Brand.quick) { hover = h } }
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .animation(Brand.press, value: configuration.isPressed)
+            .onHover { hover = $0 }   // hover highlights switch instantly
             .contentShape(Rectangle())
     }
 }
 
 /// Plain button that only adds the tactile press scale.
 struct PressableStyle: ButtonStyle {
+    var scale: CGFloat = 0.97
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .scaleEffect(configuration.isPressed ? 0.96 : 1)
-            .animation(Brand.quick, value: configuration.isPressed)
+            .scaleEffect(configuration.isPressed ? scale : 1)
+            .animation(Brand.press, value: configuration.isPressed)
     }
 }
 
@@ -128,17 +162,16 @@ struct ShortcutList: View {
 
 // MARK: - Motion helpers
 
-/// Staggered entrance: fade, lift and un-blur, delayed by index.
+/// Staggered entrance: fade and a short rise, 40ms apart, so the last item starts within ~200ms.
 struct StaggerIn: ViewModifier {
     let index: Int
     @State private var shown = false
     func body(content: Content) -> some View {
         content
             .opacity(shown ? 1 : 0)
-            .offset(y: shown || Brand.reduceMotion ? 0 : 10)
-            .blur(radius: shown || Brand.reduceMotion ? 0 : 4)
+            .offset(y: shown || Brand.reduceMotion ? 0 : 8)
             .onAppear {
-                withAnimation(.spring(response: 0.5, dampingFraction: 1).delay(0.06 + Double(index) * 0.07)) { shown = true }
+                withAnimation(Brand.easeOut(0.36).delay(0.03 + Double(index) * 0.04)) { shown = true }
             }
     }
 }
@@ -226,8 +259,11 @@ struct UsageBar: View {
             GeometryReader { g in
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color.primary.opacity(0.08))
-                    Capsule().fill(frac > 0.9 ? AnyShapeStyle(Color.orange) : AnyShapeStyle(Brand.gradient))
-                        .frame(width: max(6, g.size.width * frac))
+                    // Nothing used yet means an empty track, not a stray dot.
+                    if frac > 0 {
+                        Capsule().fill(frac > 0.9 ? AnyShapeStyle(Color.orange) : AnyShapeStyle(Brand.gradient))
+                            .frame(width: max(6, g.size.width * frac))
+                    }
                 }
             }
             .frame(height: 6)
@@ -383,7 +419,7 @@ struct GoogleButton: View {
         .buttonStyle(PressableStyle())
         .disabled(waiting)
         .opacity(waiting ? 0.6 : 1)
-        .onHover { h in withAnimation(Brand.quick) { hover = h } }
+        .onHover { hover = $0 }
     }
 }
 

@@ -159,6 +159,7 @@ private struct StepScaffold<Art: View, Content: View, Actions: View>: View {
             art().staggerIn(0)
             Text(title)
                 .font(.system(size: 26, weight: .bold))
+                .tracking(Brand.tracking(26))
                 .multilineTextAlignment(.center)
                 .padding(.top, 26)
                 .staggerIn(1)
@@ -493,8 +494,8 @@ private struct KeyOption: View {
             .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(selected ? Brand.accent.opacity(0.7) : Color.primary.opacity(0.08), lineWidth: selected ? 1.5 : 1))
             .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
-        .buttonStyle(PressableStyle())
-        .onHover { h in withAnimation(Brand.quick) { hover = h } }
+        .buttonStyle(PressableStyle(scale: 0.98))
+        .onHover { hover = $0 }
     }
 }
 
@@ -629,7 +630,8 @@ private struct LessonKeys: View {
                         KeyCap(label: cap, pressed: triggerDown || recording, large: true)
                     case .handsfree:
                         KeyCap(label: cap, pressed: triggerDown || demoTap || locked, large: true)
-                        caption(locked ? "Listening, tap again to finish" : "tap tap")
+                            // The caption hangs off the key so the key itself stays optically centered.
+                            .overlay(alignment: .trailing) { caption(locked ? "Listening, tap again to finish" : "tap tap").offset(x: 124) }
                     case .command:
                         KeyCap(label: cap, pressed: triggerDown || recording, large: true)
                         Text("+").font(.system(size: 22, weight: .medium)).foregroundColor(.secondary)

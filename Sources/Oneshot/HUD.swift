@@ -414,7 +414,7 @@ private struct HUDButton: View {
                 .contentShape(Circle().inset(by: -6))  // ~40pt hit area
         }
         .buttonStyle(PressableStyle())
-        .onHover { h in withAnimation(Brand.quick) { hover = h } }
+        .onHover { hover = $0 }
         .help(help)
     }
 }

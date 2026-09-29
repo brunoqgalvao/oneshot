@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import Charts
+import UniformTypeIdentifiers
 
 // MARK: - Window
 
@@ -151,7 +152,7 @@ private struct SidebarFooter: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(PressableStyle())
-            .onHover { h in withAnimation(Brand.quick) { hover = h } }
+            .onHover { hover = $0 }
         }
         .padding(12)
     }
@@ -171,7 +172,7 @@ struct PageScaffold<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(title).font(.system(size: 26, weight: .bold))
+                Text(title).font(.system(size: 26, weight: .bold)).tracking(Brand.tracking(26))
                 Text(subtitle).font(.system(size: 13)).foregroundColor(.secondary)
             }
             .padding(.horizontal, 32).padding(.top, 34).padding(.bottom, 6)
@@ -201,7 +202,7 @@ private struct HomePage: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(greeting).font(.system(size: 28, weight: .bold)).staggerIn(0)
+                    Text(greeting).font(.system(size: 28, weight: .bold)).tracking(Brand.tracking(28)).staggerIn(0)
                     HStack(spacing: 6) {
                         Text("Hold")
                         KeyCap(label: prefs.trigger.cap, pressed: controller.triggerHeld || controller.isRecording)
@@ -245,8 +246,8 @@ private struct HomePage: View {
                                 if d.id != recent.last?.id { Divider().padding(.leading, 56) }
                             }
                         }
-                        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color(nsColor: .controlBackgroundColor)))
-                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.primary.opacity(0.06)))
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .surface(radius: 14)
                     }
                     .staggerIn(3)
                 }
@@ -270,9 +271,7 @@ private struct Card<Content: View>: View {
         content()
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color(nsColor: .controlBackgroundColor)))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.primary.opacity(0.06)))
-            .shadow(color: .black.opacity(0.03), radius: 6, y: 2)
+            .surface(radius: 14)
     }
 }
 
@@ -280,6 +279,8 @@ private struct WeekCard: View {
     @ObservedObject private var history = HistoryStore.shared
     var body: some View {
         let days = history.dailyWords(days: 7)
+        // Quiet days get a short stub so the week reads as seven days, not one lonely bar.
+        let stub = max(1, Double(days.map(\.words).max() ?? 0) * 0.035)
         Card {
             VStack(alignment: .leading, spacing: 14) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -287,12 +288,15 @@ private struct WeekCard: View {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text(days.reduce(0) { $0 + $1.words }.formatted())
                             .font(.system(size: 30, weight: .bold, design: .rounded).monospacedDigit())
+                            .tracking(Brand.tracking(30))
                         Text("words").font(.system(size: 13)).foregroundColor(.secondary)
                     }
                 }
                 Chart(days, id: \.day) { d in
-                    BarMark(x: .value("Day", d.day, unit: .day), y: .value("Words", d.words), width: .ratio(0.55))
-                        .foregroundStyle(Calendar.current.isDateInToday(d.day) ? AnyShapeStyle(Brand.gradient) : AnyShapeStyle(Brand.accent.opacity(0.35)))
+                    let today = Calendar.current.isDateInToday(d.day)
+                    BarMark(x: .value("Day", d.day, unit: .day), y: .value("Words", d.words > 0 ? Double(d.words) : stub), width: .ratio(0.55))
+                        .foregroundStyle(d.words == 0 ? AnyShapeStyle(Color.primary.opacity(0.08))
+                                         : today ? AnyShapeStyle(Brand.gradient) : AnyShapeStyle(Brand.accent.opacity(0.35)))
                         .cornerRadius(5)
                 }
                 .chartXAxis {
@@ -319,7 +323,7 @@ private struct MetricCard: View {
                     .frame(width: 30, height: 30)
                     .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Brand.accent.opacity(0.12)))
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(value).font(.system(size: 17, weight: .semibold, design: .rounded).monospacedDigit())
+                    Text(value).font(.system(size: 17, weight: .semibold, design: .rounded).monospacedDigit()).tracking(Brand.tracking(17) / 2)
                     Text(label).font(.system(size: 11)).foregroundColor(.secondary)
                 }
             }
@@ -343,7 +347,7 @@ private struct RecentRow: View {
                     Text(d.date, style: .relative)
                     Text("ago")
                 }
-                .font(.system(size: 11)).foregroundColor(.secondary)
+                .font(.system(size: 11).monospacedDigit()).foregroundColor(.secondary)
             }
             Spacer(minLength: 8)
             Button {
@@ -366,19 +370,18 @@ private struct RecentRow: View {
         .padding(.horizontal, 14).padding(.vertical, 11)
         .background(Color.primary.opacity(hover ? 0.03 : 0))
         .contentShape(Rectangle())
-        .onHover { h in withAnimation(Brand.quick) { hover = h } }
+        .onHover { hover = $0 }
     }
 }
 
 struct AppIconView: View {
     let bundleID: String?
     let name: String?
+    /// The system's generic app icon: an app we can't find still looks like an app, not a missing image.
+    private static let generic: NSImage = NSImage(contentsOfFile: "/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/GenericApplicationIcon.icns")
+        ?? NSWorkspace.shared.icon(for: .application)
     var body: some View {
-        if let img = AppIcons.icon(bundleID: bundleID, name: name) {
-            Image(nsImage: img).resizable().interpolation(.high)
-        } else {
-            Image(systemName: "app.dashed").font(.system(size: 18)).foregroundColor(.secondary)
-        }
+        Image(nsImage: AppIcons.icon(bundleID: bundleID, name: name) ?? Self.generic).resizable().interpolation(.high)
     }
 }
 

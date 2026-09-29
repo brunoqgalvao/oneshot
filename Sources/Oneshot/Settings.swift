@@ -269,10 +269,13 @@ struct AccountPane: View {
 
             if prefs.engine != .apple {
                 Section {
-                    Toggle("Transcribe on this Mac when offline", isOn: $prefs.offlineFallback)
-                } footer: {
-                    Text("Uses Apple's on-device speech recognition if the server can't be reached.")
-                        .font(.system(size: 11)).foregroundColor(.secondary)
+                    Toggle(isOn: $prefs.offlineFallback) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Transcribe on this Mac when offline")
+                            Text("Uses Apple's on-device speech recognition if the server can't be reached.")
+                                .font(.system(size: 11)).foregroundColor(.secondary)
+                        }
+                    }
                 }
             }
         }
@@ -338,8 +341,8 @@ private struct EngineCard: View {
                 .fill(selected ? Brand.accent.opacity(0.09) : Color.primary.opacity(hover ? 0.04 : 0)))
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
-        .buttonStyle(PressableStyle())
-        .onHover { h in withAnimation(Brand.quick) { hover = h } }
+        .buttonStyle(PressableStyle(scale: 0.98))
+        .onHover { hover = $0 }
     }
 }
 
@@ -565,6 +568,6 @@ private struct HistoryRow: View {
         }
         .padding(.horizontal, 14).padding(.vertical, 11)
         .contentShape(Rectangle())
-        .onHover { h in withAnimation(Brand.quick) { hover = h } }
+        .onHover { hover = $0 }
     }
 }
