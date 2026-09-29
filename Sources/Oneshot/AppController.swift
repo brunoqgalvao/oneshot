@@ -334,6 +334,16 @@ final class AppController: ObservableObject {
     private func process(_ rec: Recording, _ s: Session, releasedAt: Date, pendingID: UUID?, deliver: Deliver) async {
         // The audio is done with: a fresh recording's temp folder, or a saved one that finally went through.
         func done() { if let pendingID { pending.remove(pendingID) } else { rec.discard() } }
+        // Nothing recognized: a fresh recording is dropped, but a saved one is kept for the user to decide.
+        func nothingHeard() {
+            if let pendingID {
+                pending.failedAgain(pendingID, error: "No speech found")
+                flash(.notice("No speech found — kept in History"), sound: false)
+            } else {
+                rec.discard()
+                flash(.notice("Didn't catch that"), sound: false)
+            }
+        }
         do {
             var selection = s.focus.selectedText
             // AX couldn't see the field (common in Electron apps): read the selection via ⌘C.
@@ -350,14 +360,13 @@ final class AppController: ObservableObject {
 
             let raw = out.raw.trimmingCharacters(in: .whitespacesAndNewlines)
             if raw.isEmpty || Hallucination.isLikely(raw, rec) {
-                done()
-                flash(.notice("Didn't catch that"), sound: false)
+                nothingHeard()
                 return
             }
             var text = out.text.isEmpty ? raw : out.text
             if !s.command && deliver == .paste { text = Spacing.join(text, after: s.focus.textBeforeCursor) }
             guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                done(); flash(.notice("Didn't catch that"), sound: false); return
+                nothingHeard(); return
             }
 
             // Debug runs (fake audio) only paste into TextEdit, so a test can never type into real work.
