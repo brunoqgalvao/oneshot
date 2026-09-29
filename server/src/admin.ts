@@ -54,7 +54,7 @@ export const adminPage = String.raw`<!doctype html>
       <div class="card"><div class="label">Today</div><div class="big" id="today"></div><div class="small" id="todayMin"></div></div>
       <div class="card"><div class="label">This week</div><div class="big" id="week"></div><div class="small" id="weekMin"></div></div>
       <div class="card"><div class="label">This month</div><div class="big" id="month"></div><div class="small" id="monthMin"></div></div>
-      <div class="card"><div class="label">Pace (last 7 days × 30)</div><div class="big" id="pace"></div><div class="small" id="users"></div></div>
+      <div class="card"><div class="label">Monthly pace (last 7 days)</div><div class="big" id="pace"></div><div class="small" id="users"></div></div>
     </div>
     <h2>Last 30 days</h2>
     <div class="card"><div class="chart" id="chart"></div><div class="axis"><span id="a0"></span><span>striped = estimated from minutes</span><span>today</span></div></div>
