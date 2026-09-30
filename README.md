@@ -13,8 +13,8 @@ curl -fsSL https://oneshot.agenturl.dev/install.sh | sh
 
 | Keys | |
 | --- | --- |
-| Hold **fn** | Dictate, release to insert |
-| Double-tap **fn**, or **fn + Space** | Hands-free, tap again to finish |
+| Hold **left ⌥** (or right ⌥ / fn, in Settings) | Dictate, release to insert |
+| Double-tap **⌥**, or **⌥ + Space** | Hands-free, tap again to finish |
 | Hold **⌃** while dictating | Rewrite the selected text ("make this friendlier", "translate to English") |
 | **esc** | Cancel |
 
@@ -28,7 +28,7 @@ curl -fsSL https://oneshot.agenturl.dev/install.sh | sh
 ## How it works
 
 ```
-fn held ─▶ CGEventTap ─▶ AVAudioEngine (16 kHz) ─▶ AAC ─▶ server ─▶ gpt-4o-transcribe
+⌥ held ─▶ CGEventTap ─▶ AVAudioEngine (16 kHz) ─▶ AAC ─▶ server ─▶ gpt-4o-transcribe
                                                               └─▶ gpt-5.4-mini cleanup ─▶ ⌘V into the focused app
 ```
 

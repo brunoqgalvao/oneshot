@@ -15,4 +15,4 @@ mv "$TMP/Oneshot.app" "$DEST/"
 xattr -dr com.apple.quarantine "$DEST/Oneshot.app" 2>/dev/null || true
 rm -rf "$TMP"
 open "$DEST/Oneshot.app"
-echo "Oneshot is installed in $DEST. Follow the setup, then hold fn and talk."
+echo "Oneshot is installed in $DEST. Follow the setup, then hold the left Option key (⌥) and talk."
