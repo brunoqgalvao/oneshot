@@ -138,7 +138,12 @@ final class ChatGPTAccount: ObservableObject {
 
     /// True when text requests should go to the user's ChatGPT plan.
     var ready: Bool { connected && planEnabled && Prefs.shared.useChatGPTPlan }
-    var selectedModel: String { Prefs.shared.chatgptModel.isEmpty ? (Self.pickDefault(models)?.slug ?? "") : Prefs.shared.chatgptModel }
+    /// The user's pick, else the lightest listed model. Until the list loads, the last default we saw,
+    /// so the first dictation after launch already runs on the plan.
+    var selectedModel: String {
+        if !Prefs.shared.chatgptModel.isEmpty { return Prefs.shared.chatgptModel }
+        return Self.pickDefault(models)?.slug ?? UserDefaults.standard.string(forKey: "chatgptLastDefault") ?? ""
+    }
 
     private init() {
         publish()
@@ -344,6 +349,7 @@ final class ChatGPTAccount: ObservableObject {
             try ChatGPTClient.check(resp, data)
             struct List: Decodable { let models: [ChatGPTModel] }
             models = try JSONDecoder().decode(List.self, from: data).models.filter { $0.visibility == nil || $0.visibility == "list" }
+            if let slug = Self.pickDefault(models)?.slug { UserDefaults.standard.set(slug, forKey: "chatgptLastDefault") }
         } catch {
             NSLog("Oneshot: couldn't list ChatGPT models: \(error.localizedDescription)")
         }

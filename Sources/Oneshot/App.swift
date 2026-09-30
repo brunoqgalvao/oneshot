@@ -64,6 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
         onboarding.model.onFinish = { [weak self] in self?.finishOnboarding() }
         controller.start()
+        _ = ChatGPTAccount.shared   // load the ChatGPT account and its models now, before the first dictation
         Task { await Account.shared.refresh(); self.statusMenu?.refresh() }
 
         indicator.onClick = { [weak self] in
