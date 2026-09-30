@@ -2,13 +2,14 @@ import Foundation
 import CoreGraphics
 
 enum TriggerKey: String, CaseIterable, Identifiable {
-    case fn, rightOption, rightCommand
+    case leftOption, rightOption, fn, rightCommand
 
     var id: String { rawValue }
 
     var label: String {
         switch self {
         case .fn: return "fn / 🌐 Globe"
+        case .leftOption: return "Left ⌥ Option"
         case .rightOption: return "Right ⌥ Option"
         case .rightCommand: return "Right ⌘ Command"
         }
@@ -17,6 +18,7 @@ enum TriggerKey: String, CaseIterable, Identifiable {
     var short: String {
         switch self {
         case .fn: return "fn"
+        case .leftOption: return "left ⌥"
         case .rightOption: return "right ⌥"
         case .rightCommand: return "right ⌘"
         }
@@ -26,7 +28,7 @@ enum TriggerKey: String, CaseIterable, Identifiable {
     var cap: String {
         switch self {
         case .fn: return "fn"
-        case .rightOption: return "⌥"
+        case .leftOption, .rightOption: return "⌥"
         case .rightCommand: return "⌘"
         }
     }
@@ -34,6 +36,7 @@ enum TriggerKey: String, CaseIterable, Identifiable {
     var keyCode: Int64 {
         switch self {
         case .fn: return 63
+        case .leftOption: return 58
         case .rightOption: return 61
         case .rightCommand: return 54
         }
@@ -42,8 +45,18 @@ enum TriggerKey: String, CaseIterable, Identifiable {
     var flag: CGEventFlags {
         switch self {
         case .fn: return .maskSecondaryFn
-        case .rightOption: return .maskAlternate
+        case .leftOption, .rightOption: return .maskAlternate
         case .rightCommand: return .maskCommand
+        }
+    }
+
+    /// Device-dependent bit (NX_DEVICEL/RALTKEYMASK…) that tells the left key from the right one.
+    var deviceMask: UInt64? {
+        switch self {
+        case .fn: return nil
+        case .leftOption: return 0x20
+        case .rightOption: return 0x40
+        case .rightCommand: return 0x10
         }
     }
 }
@@ -103,7 +116,7 @@ final class Prefs: ObservableObject {
     private init() {
         Self.migrateFromMurmur(d)
         d.register(defaults: [
-            "trigger": TriggerKey.fn.rawValue,
+            "trigger": TriggerKey.leftOption.rawValue,
             "engine": Engine.cloud.rawValue,
             "transcribeModel": "gpt-4o-transcribe",
             "cleanupEnabled": true,
@@ -117,7 +130,7 @@ final class Prefs: ObservableObject {
             "offlineFallback": true,
             "showIndicator": true,
         ])
-        trigger = TriggerKey(rawValue: d.string(forKey: "trigger") ?? "") ?? .fn
+        trigger = TriggerKey(rawValue: d.string(forKey: "trigger") ?? "") ?? .leftOption
         engine = Engine(rawValue: d.string(forKey: "engine") ?? "") ?? .cloud
         transcribeModel = d.string(forKey: "transcribeModel") ?? "gpt-4o-transcribe"
         cleanupEnabled = d.bool(forKey: "cleanupEnabled")

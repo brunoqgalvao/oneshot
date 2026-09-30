@@ -463,11 +463,14 @@ private struct KeyStep: View {
             KeyCap(label: prefs.trigger.cap, large: true)
         } content: {
             HStack(spacing: 12) {
+                KeyOption(selected: prefs.trigger == .leftOption, key: "⌥", title: "Left Option", detail: "Right under your thumb. Works on any keyboard.", warn: false) {
+                    withAnimation(Brand.spring) { prefs.trigger = .leftOption }
+                }
+                KeyOption(selected: prefs.trigger == .rightOption, key: "⌥", title: "Right Option", detail: "Keeps left ⌥ free for accents and shortcuts.", warn: false) {
+                    withAnimation(Brand.spring) { prefs.trigger = .rightOption }
+                }
                 KeyOption(selected: prefs.trigger == .fn, key: "fn", title: "Globe key", detail: fnDetail, warn: fnUsage != 0) {
                     withAnimation(Brand.spring) { prefs.trigger = .fn }
-                }
-                KeyOption(selected: prefs.trigger == .rightOption, key: "⌥", title: "Right Option", detail: "Works on any keyboard, including external ones.", warn: false) {
-                    withAnimation(Brand.spring) { prefs.trigger = .rightOption }
                 }
             }
         } actions: {
@@ -482,7 +485,7 @@ private struct KeyStep: View {
     }
 
     private var fnDetail: String {
-        fnUsage == 0 ? "Ready to go." : "Set “Press 🌐 key to” to Do Nothing so it doesn't open the emoji picker."
+        fnUsage == 0 ? "Ready to go." : "First set “Press 🌐 key to” Do Nothing in Keyboard settings."
     }
 }
 
@@ -513,7 +516,7 @@ private struct KeyOption: View {
                 Spacer(minLength: 0)
             }
             .padding(14)
-            .frame(width: 196, height: 150, alignment: .topLeading)
+            .frame(width: 160, height: 164, alignment: .topLeading)
             .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(selected ? Brand.accent.opacity(0.1) : Color(nsColor: .controlBackgroundColor).opacity(hover ? 1 : 0.7)))
             .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(selected ? Brand.accent.opacity(0.7) : Color.primary.opacity(0.08), lineWidth: selected ? 1.5 : 1))
             .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))

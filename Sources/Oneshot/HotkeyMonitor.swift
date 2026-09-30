@@ -2,10 +2,10 @@ import AppKit
 import Carbon.HIToolbox
 
 /// Global keyboard listener built on a CGEventTap. Reports presses/releases of
-/// a single modifier key (fn, right ⌥, right ⌘) and lets the controller
+/// a single modifier key (left or right ⌥, fn, right ⌘) and lets the controller
 /// consume Space (lock hands-free) and Esc (cancel) while dictating.
 final class HotkeyMonitor {
-    var trigger: TriggerKey = .fn
+    var trigger: TriggerKey = .leftOption
 
     var onPress: (() -> Void)?
     var onRelease: (() -> Void)?
@@ -60,7 +60,8 @@ final class HotkeyMonitor {
         switch type {
         case .flagsChanged:
             if code == trigger.keyCode {
-                let down = event.flags.contains(trigger.flag)
+                // Left and right ⌥ share one flag; the device bit says which side is actually down.
+                let down = trigger.deviceMask.map { event.flags.rawValue & $0 != 0 } ?? event.flags.contains(trigger.flag)
                 if down != isTriggerDown {
                     isTriggerDown = down
                     down ? onPress?() : onRelease?()
