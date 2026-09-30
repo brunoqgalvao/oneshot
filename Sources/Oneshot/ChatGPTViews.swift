@@ -35,106 +35,127 @@ struct ManageUsageLink: View {
     }
 }
 
-/// Settings → Account: connect, status, model, disconnect.
-struct ChatGPTPlanCard: View {
+/// Settings → Account: ChatGPT as one row of the accounts list. It works alongside the
+/// transcription choice above it, so it gets a switch instead of a radio button.
+struct ChatGPTAccountRow: View {
     @ObservedObject private var gpt = ChatGPTAccount.shared
     @ObservedObject private var prefs = Prefs.shared
     @State private var disconnecting = false
     @State private var revokeNote: String?
+    @State private var hover = false
+    private static let logo: NSImage? = Bundle.main.url(forResource: "chatgpt-logo", withExtension: "png").flatMap { NSImage(contentsOf: $0) }
+
+    private var active: Bool { gpt.connected && gpt.planEnabled && prefs.useChatGPTPlan }
+
+    private var detail: String {
+        guard gpt.connected else { return "Clean up and rewrite on your ChatGPT Plus or Pro plan." }
+        let who = gpt.email ?? "Connected"
+        if !gpt.planEnabled { return who + " · plan usage isn't enabled" }
+        return prefs.useChatGPTPlan ? who : who + " · off, Oneshot cleans up"
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if gpt.connected {
-                connected
-            } else {
-                HStack(alignment: .center, spacing: 14) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Use your ChatGPT plan").font(.system(size: 13, weight: .semibold))
-                        Text("Cleanup and Command mode run on your ChatGPT Plus or Pro plan instead of Oneshot's servers. Speech-to-text still uses the option above.")
-                            .font(.system(size: 11.5)).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.black.opacity(active || !gpt.connected ? 1 : 0.45))
+                    if let logo = Self.logo { Image(nsImage: logo).resizable().interpolation(.high).frame(width: 16, height: 16) }
+                }
+                .frame(width: 30, height: 30)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text("ChatGPT").font(.system(size: 13, weight: .semibold))
+                        if gpt.connected {
+                            Text("Connected").font(.system(size: 10.5, weight: .semibold)).foregroundColor(Brand.success)
+                                .padding(.horizontal, 6).padding(.vertical, 1.5)
+                                .background(Capsule().fill(Brand.success.opacity(0.14)))
+                        }
                     }
-                    Spacer(minLength: 8)
-                    ContinueWithChatGPTButton { gpt.connect() }.disabled(gpt.waiting)
+                    Text(detail).font(.system(size: 11.5)).foregroundColor(.secondary).lineLimit(1)
                 }
+                Spacer(minLength: 8)
+                trailing
             }
-            if gpt.waiting {
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
-                    Text("Finish in your browser…").font(.system(size: 12)).foregroundColor(.secondary)
-                    Spacer()
-                    Button("Cancel") { gpt.cancelSignIn() }.buttonStyle(.link).font(.system(size: 12))
+            .padding(10)
+
+            if active {
+                HStack(spacing: 6) {
+                    Text("Model").font(.system(size: 12)).foregroundColor(.secondary)
+                    Picker("Model", selection: $prefs.chatgptModel) {
+                        Text("Automatic (\(ChatGPTAccount.pickDefault(gpt.models)?.name ?? "fastest available"))").tag("")
+                        ForEach(gpt.models) { m in Text(m.name).tag(m.slug) }
+                    }
+                    .pickerStyle(.menu).labelsHidden().fixedSize().controlSize(.small)
+                    Spacer(minLength: 8)
+                    ManageUsageLink().fixedSize()
                 }
+                .padding(.leading, 52).padding(.trailing, 10).padding(.bottom, 10)
                 .transition(.opacity)
             }
-            if let e = gpt.error {
-                Label(e, systemImage: "exclamationmark.circle.fill").font(.system(size: 12)).foregroundColor(.red)
-                    .fixedSize(horizontal: false, vertical: true)
+            if active && gpt.limitReached {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundColor(.orange)
+                    Text("Usage limit reached. Until it resets, dictations aren't cleaned up.")
+                        .font(.system(size: 11.5)).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.leading, 52).padding(.trailing, 10).padding(.bottom, 10)
             }
-            if let revokeNote {
-                Text(revokeNote).font(.system(size: 11)).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
-            }
+            notes.padding(.leading, 52).padding(.trailing, 10)
         }
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(Color.primary.opacity(active ? 0.05 : (hover ? 0.03 : 0))))
+        .onHover { hover = $0 }
+        .animation(Brand.spring, value: active)
         .animation(Brand.spring, value: gpt.waiting)
         .animation(Brand.spring, value: gpt.connected)
     }
 
-    @ViewBuilder private var connected: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "checkmark.seal.fill").font(.system(size: 17)).foregroundColor(.primary)
-                .frame(width: 30, height: 30)
-                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(0.07)))
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(gpt.email ?? "ChatGPT account").font(.system(size: 13, weight: .semibold))
-                    Text("Connected").font(.system(size: 10.5, weight: .semibold)).foregroundColor(Brand.success)
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(Capsule().fill(Brand.success.opacity(0.14)))
-                }
-                Text(gpt.planEnabled ? "ChatGPT plan usage is enabled." : "ChatGPT plan usage isn't enabled for this connection.")
-                    .font(.system(size: 11.5)).foregroundColor(.secondary)
-            }
-            Spacer()
-            Button(disconnecting ? "Disconnecting…" : "Disconnect") { disconnect() }
-                .buttonStyle(SecondaryButtonStyle()).disabled(disconnecting)
-        }
-        if gpt.planEnabled {
-            if gpt.limitReached {
-                HStack(spacing: 10) {
-                    Image(systemName: "exclamationmark.triangle.fill").foregroundColor(.orange)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("Usage limit reached").font(.system(size: 12, weight: .semibold))
-                        Text("Review your plan or this app's limit in ChatGPT settings. Until then, dictations aren't cleaned up.")
-                            .font(.system(size: 11)).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
-                    }
-                    Spacer()
-                    Button("Manage usage") { NSWorkspace.shared.open(SIWC.manageUsage) }.buttonStyle(SecondaryButtonStyle())
-                }
-                .padding(10)
-                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.orange.opacity(0.1)))
-            }
-            Toggle("Use my ChatGPT plan for cleanup and Command mode", isOn: $prefs.useChatGPTPlan)
-            if prefs.useChatGPTPlan {
-                Picker("Model", selection: $prefs.chatgptModel) {
-                    Text("Automatic (\(ChatGPTAccount.pickDefault(gpt.models)?.name ?? "fastest available"))").tag("")
-                    ForEach(gpt.models) { m in Text(m.name).tag(m.slug) }
-                }
-            }
-            HStack(spacing: 6) {
-                if prefs.useChatGPTPlan {
-                    Text("Using ChatGPT plan").font(.system(size: 11.5, weight: .medium)).foregroundColor(.secondary)
-                    Text("·").foregroundColor(.secondary)
-                }
-                ManageUsageLink()
-            }
+    @ViewBuilder private var trailing: some View {
+        if !gpt.connected {
+            ContinueWithChatGPTButton(compact: true) { gpt.connect() }.disabled(gpt.waiting)
         } else {
-            HStack {
-                Text("Allow Oneshot to use your plan to clean up dictations with ChatGPT.").font(.system(size: 11.5)).foregroundColor(.secondary)
-                Spacer()
-                ContinueWithChatGPTButton(title: "Enable ChatGPT plan", compact: true) { gpt.connect() }
+            HStack(spacing: 4) {
+                if gpt.planEnabled {
+                    Toggle("Use my ChatGPT plan", isOn: $prefs.useChatGPTPlan)
+                        .toggleStyle(.switch).labelsHidden().controlSize(.small)
+                        .help("Use my ChatGPT plan for cleanup and Command mode")
+                } else {
+                    Button("Enable plan") { gpt.connect() }.buttonStyle(SecondaryButtonStyle())
+                }
+                Menu {
+                    Button("Manage usage") { NSWorkspace.shared.open(SIWC.manageUsage) }
+                    Button("Use another ChatGPT account") { gpt.connect(anotherAccount: true) }
+                    Divider()
+                    Button(disconnecting ? "Disconnecting…" : "Disconnect") { disconnect() }
+                } label: {
+                    Image(systemName: "ellipsis").font(.system(size: 13, weight: .semibold)).foregroundColor(.secondary)
+                        .frame(width: 26, height: 26).contentShape(Rectangle())
+                }
+                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                .disabled(disconnecting || gpt.waiting)
             }
         }
-        Button("Use another ChatGPT account") { gpt.connect(anotherAccount: true) }
-            .buttonStyle(.link).font(.system(size: 12)).disabled(gpt.waiting)
+    }
+
+    @ViewBuilder private var notes: some View {
+        if gpt.waiting {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("Finish in your browser…").font(.system(size: 12)).foregroundColor(.secondary)
+                Spacer()
+                Button("Cancel") { gpt.cancelSignIn() }.buttonStyle(.link).font(.system(size: 12))
+            }
+            .padding(.bottom, 10)
+            .transition(.opacity)
+        }
+        if let e = gpt.error {
+            Label(e, systemImage: "exclamationmark.circle.fill").font(.system(size: 12)).foregroundColor(.red)
+                .fixedSize(horizontal: false, vertical: true).padding(.bottom, 10)
+        }
+        if let revokeNote {
+            Text(revokeNote).font(.system(size: 11)).foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true).padding(.bottom, 10)
+        }
     }
 
     private func disconnect() {
@@ -146,6 +167,7 @@ struct ChatGPTPlanCard: View {
         }
     }
 }
+
 
 /// Home: invites signed-in people to use their ChatGPT plan. Dismissible, shown until they connect.
 struct ChatGPTInviteBanner: View {
@@ -193,4 +215,3 @@ struct UsingChatGPTPlanLine: View {
         }
     }
 }
-

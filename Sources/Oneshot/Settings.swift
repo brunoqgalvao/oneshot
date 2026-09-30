@@ -231,9 +231,15 @@ struct AccountPane: View {
                     ForEach(Engine.allCases) { e in
                         EngineCard(engine: e, selected: prefs.engine == e) { withAnimation(Brand.spring) { prefs.engine = e } }
                     }
+                    Divider().padding(.horizontal, 10)
+                    ChatGPTAccountRow()
                 }
                 .padding(.vertical, 4)
-            } header: { Text("How Oneshot transcribes") }
+            } header: { Text("Accounts") } footer: {
+                Text("Pick one to turn speech into text. ChatGPT works with any of them: it takes over cleanup and Command mode.")
+                    .font(.system(size: 11)).foregroundColor(.secondary)
+                    .multilineTextAlignment(.leading).frame(maxWidth: .infinity, alignment: .leading)
+            }
 
             Section {
                 switch prefs.engine {
@@ -259,13 +265,13 @@ struct AccountPane: View {
                         Text("gpt-4.1-mini").tag("gpt-4.1-mini")
                     }
                 case .apple:
-                    Text("Audio never leaves this Mac. Connect your ChatGPT plan below (or add an OpenAI key) for cleanup and Command mode.")
+                    Text("Audio never leaves this Mac. Connect ChatGPT above (or add an OpenAI key) for cleanup and Command mode.")
                         .font(.system(size: 12)).foregroundColor(.secondary)
                     if AppleTranscriber.status != .authorized {
                         Button("Allow Speech Recognition") { AppleTranscriber.requestPermission { _ in } }
                     }
                 }
-            } header: { Text(prefs.engine == .cloud ? "Account" : prefs.engine == .openAI ? "OpenAI" : "On-device") }
+            } header: { Text(prefs.engine == .cloud ? "Oneshot account" : prefs.engine == .openAI ? "OpenAI" : "On-device") }
 
             if prefs.engine != .apple {
                 Section {
@@ -278,10 +284,6 @@ struct AccountPane: View {
                     }
                 }
             }
-
-            Section {
-                ChatGPTPlanCard().padding(.vertical, 4)
-            } header: { Text("ChatGPT") }
         }
         .formStyle(.grouped)
         .frame(width: 620, height: 760)
