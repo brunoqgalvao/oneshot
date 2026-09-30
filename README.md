@@ -23,6 +23,7 @@ curl -fsSL https://oneshot.agenturl.dev/install.sh | sh
 - Your vocabulary (names, products, jargon) is spelled your way.
 - Every dictation stays on your clipboard and in your history.
 - Free (30 minutes a week), your own OpenAI key (unlimited), or fully on-device with Apple's speech recognition.
+- Sign in with ChatGPT to run cleanup and Command mode on your own ChatGPT plan ([Sign in with ChatGPT](https://developers.openai.com/siwc/token-sharing-open-source)). Transcription still uses the Oneshot server, your key or the Mac, because ChatGPT plans only cover the Responses API.
 - Feedback inside the app goes to an AI engineer (Claude Opus) that runs in a loop on this repo: it ships what it can and replies to you in the app. Oneshot updates itself.
 
 ## How it works
@@ -50,6 +51,8 @@ Releases: `./release.sh 0.2.1 "notes"` builds, zips and publishes a GitHub relea
 ## Privacy
 
 Audio is sent to the Oneshot server only while you hold the key, transcribed, and discarded. Neither audio nor text is stored on the server. History stays on your Mac. With your own key, audio goes straight to OpenAI; on-device mode never leaves your Mac.
+
+With ChatGPT connected, the transcript goes from your Mac straight to OpenAI under your ChatGPT account (`store: false`); it never passes through the Oneshot server. Tokens live in `~/Library/Application Support/Oneshot/chatgpt.json` (readable only by you), and Disconnect in Settings → Account revokes them.
 
 ## License
 

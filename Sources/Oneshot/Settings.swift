@@ -259,7 +259,7 @@ struct AccountPane: View {
                         Text("gpt-4.1-mini").tag("gpt-4.1-mini")
                     }
                 case .apple:
-                    Text("Audio never leaves this Mac. Cleanup and Command mode need a Oneshot account or an OpenAI key.")
+                    Text("Audio never leaves this Mac. Connect your ChatGPT plan below (or add an OpenAI key) for cleanup and Command mode.")
                         .font(.system(size: 12)).foregroundColor(.secondary)
                     if AppleTranscriber.status != .authorized {
                         Button("Allow Speech Recognition") { AppleTranscriber.requestPermission { _ in } }
@@ -278,9 +278,13 @@ struct AccountPane: View {
                     }
                 }
             }
+
+            Section {
+                ChatGPTPlanCard().padding(.vertical, 4)
+            } header: { Text("ChatGPT") }
         }
         .formStyle(.grouped)
-        .frame(width: 620, height: 600)
+        .frame(width: 620, height: 760)
         .animation(Brand.spring, value: prefs.engine)
         .animation(Brand.spring, value: account.isSignedIn)
     }
@@ -312,7 +316,7 @@ private struct EngineCard: View {
         switch engine {
         case .cloud: return ("sparkles", "Oneshot account", "Free. Best accuracy and cleanup, nothing to set up.")
         case .openAI: return ("key.fill", "Your own OpenAI key", "Calls OpenAI directly; billed to your account.")
-        case .apple: return ("lock.fill", "On this Mac", "Private and offline. Less accurate, no cleanup.")
+        case .apple: return ("lock.fill", "On this Mac", "Audio stays on this Mac. Less accurate; cleanup needs ChatGPT or a key.")
         }
     }
 

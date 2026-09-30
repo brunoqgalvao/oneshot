@@ -19,6 +19,7 @@ plutil -replace OneshotServerURL -string "$SERVER_URL" "$APP/Contents/Info.plist
 echo "Server: $SERVER_URL"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 cp Resources/google-g.png "$APP/Contents/Resources/google-g.png"
+cp Resources/chatgpt-logo.png "$APP/Contents/Resources/chatgpt-logo.png"
 
 # Keychains used for signing: a Developer ID one (for public releases) or a stable local one.
 with_keychain() { # with_keychain <keychain> <password> <command...>

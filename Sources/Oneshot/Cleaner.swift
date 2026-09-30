@@ -39,7 +39,7 @@ enum Destination: String {
 }
 
 struct Cleaner {
-    let client: OpenAIClient
+    let client: any TextModel
 
     static let dictationSystem = """
     You are the cleanup stage of a voice dictation app. You receive a raw speech-to-text transcript and return exactly the text the speaker intended to type. It will be inserted at their cursor.

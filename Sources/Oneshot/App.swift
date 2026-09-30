@@ -25,6 +25,7 @@ enum Main {
                 CLI.auth(create: flag == "--signup", email: args[i + 1], password: args[i + 2])
             }
         }
+        if args.contains("--chatgpt-test") { CLI.chatgptTest() }
 
         let app = NSApplication.shared
         let delegate = AppDelegate()
@@ -192,6 +193,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         case "stop": if controller.isRecording { controller.finish() }
         case "cancel": controller.cancelIfRecording()
         case "command": controller.startCommand()
+        case "chatgpt":   // oneshot://chatgpt/connect, for testing sign-in
+            if path.count > 1 && path[1] == "connect" { ChatGPTAccount.shared.connect() }
         case "retry":   // oneshot://retry tries the newest saved recording again
             if let p = PendingStore.shared.items.first { controller.retry(p.id) }
         case "settings": showSettings(tab: path.count > 1 ? path[1] : "general", activate: !quiet)
@@ -249,6 +252,37 @@ enum Demo {
 ///   Oneshot --transcribe <audio file> [--app <bundle id>]
 @MainActor
 enum CLI {
+    /// Lists the connected ChatGPT account's models and cleans up a sample transcript on its plan. Never prints tokens.
+    static func chatgptTest() -> Never {
+        Task { @MainActor in
+            let gpt = ChatGPTAccount.shared
+            print("connected: \(gpt.connected) · plan enabled: \(gpt.planEnabled) · account: \(gpt.email ?? "-")")
+            guard gpt.connected, gpt.planEnabled else { exit(1) }
+            await gpt.loadModels()
+            print("models:    " + gpt.models.map { "\($0.slug) (\($0.name))" }.joined(separator: ", "))
+            let model = gpt.selectedModel
+            print("using:     \(model)")
+            let raw = "um so I think we should, uh, meet tomorrow at 2, actually no, 3 pm and, like, bring the Q3 numbers. new line thanks"
+            do {
+                let t0 = Date()
+                let out = try await Cleaner(client: gpt.client()).clean(raw: raw, destination: .email, appName: "Mail",
+                                                                       contextBefore: nil, vocabulary: [], model: model)
+                print("cleaned:   \(out.replacingOccurrences(of: "\n", with: " / "))")
+                print("timing:    \(String(format: "%.2f", Date().timeIntervalSince(t0)))s")
+                let t1 = Date()
+                let cmd = try await Cleaner(client: gpt.client()).command(instruction: "make this friendlier", selection: "Send me the report by 5.",
+                                                                          destination: .chat, appName: "Slack", model: model)
+                print("command:   \(cmd) (\(String(format: "%.2f", Date().timeIntervalSince(t1)))s)")
+                exit(0)
+            } catch {
+                fputs("error: \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)\n", stderr)
+                exit(1)
+            }
+        }
+        RunLoop.main.run()
+        exit(0)
+    }
+
     static func auth(create: Bool, email: String, password: String) -> Never {
         Task { @MainActor in
             await Account.shared.signIn(create: create, email: email, password: password)

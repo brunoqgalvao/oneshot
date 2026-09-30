@@ -93,6 +93,10 @@ final class Prefs: ObservableObject {
     @Published var keepOnClipboard: Bool { didSet { d.set(keepOnClipboard, forKey: "keepOnClipboard") } }
     @Published var offlineFallback: Bool { didSet { d.set(offlineFallback, forKey: "offlineFallback") } }
     @Published var showIndicator: Bool { didSet { d.set(showIndicator, forKey: "showIndicator") } }
+    /// When a ChatGPT account is connected, run cleanup and Command mode on the user's ChatGPT plan.
+    @Published var useChatGPTPlan: Bool { didSet { d.set(useChatGPTPlan, forKey: "useChatGPTPlan") } }
+    /// Empty = pick the lightest model the ChatGPT account offers.
+    @Published var chatgptModel: String { didSet { d.set(chatgptModel, forKey: "chatgptModel") } }
     /// Empty string = system default input.
     @Published var inputDeviceUID: String { didSet { d.set(inputDeviceUID, forKey: "inputDeviceUID") } }
     var onboarded: Bool {
@@ -129,6 +133,7 @@ final class Prefs: ObservableObject {
             "keepOnClipboard": true,
             "offlineFallback": true,
             "showIndicator": true,
+            "useChatGPTPlan": true,
         ])
         trigger = TriggerKey(rawValue: d.string(forKey: "trigger") ?? "") ?? .leftOption
         engine = Engine(rawValue: d.string(forKey: "engine") ?? "") ?? .cloud
@@ -144,6 +149,8 @@ final class Prefs: ObservableObject {
         offlineFallback = d.bool(forKey: "offlineFallback")
         inputDeviceUID = d.string(forKey: "inputDeviceUID") ?? ""
         showIndicator = d.bool(forKey: "showIndicator")
+        useChatGPTPlan = d.bool(forKey: "useChatGPTPlan")
+        chatgptModel = d.string(forKey: "chatgptModel") ?? ""
         apiKey = Secrets.loadOpenAIKey() ?? ""
     }
 

@@ -329,7 +329,7 @@ final class AppController: ObservableObject {
         }
     }
 
-    private struct Outcome { var raw: String; var text: String; var mode: String; var engine: String }
+    private struct Outcome { var raw: String; var text: String; var mode: String; var engine: String; var note: String? = nil }
 
     private func process(_ rec: Recording, _ s: Session, releasedAt: Date, pendingID: UUID?, deliver: Deliver) async {
         // The audio is done with: a fresh recording's temp folder, or a saved one that finally went through.
@@ -383,7 +383,11 @@ final class AppController: ObservableObject {
             if !isRecording {
                 let words = text.split(whereSeparator: { $0.isWhitespace }).count
                 let what = pasted ? (out.mode == "command" ? "Replaced" : "\(words) word\(words == 1 ? "" : "s")") : "Copied — press ⌘V"
-                hud.show(.done("\(what) · \(String(format: "%.1f", latency))s"), autoHideAfter: pasted ? 1.1 : 2.5)
+                if let note = out.note {
+                    hud.show(.done("\(what) · \(note)"), autoHideAfter: 3)
+                } else {
+                    hud.show(.done("\(what) · \(String(format: "%.1f", latency))s"), autoHideAfter: pasted ? 1.1 : 2.5)
+                }
             }
         } catch {
             NSLog("Oneshot failed: \(error)")
@@ -415,20 +419,23 @@ final class AppController: ObservableObject {
 
     /// One request to the Oneshot server: it transcribes and cleans up.
     private func viaCloud(rec: Recording, s: Session, selection: String?) async throws -> Outcome {
+        // With a ChatGPT plan connected, the server only transcribes; cleanup and Command mode run on the plan.
+        let gpt = chatGPTModel()
         let meta = DictateMeta(
-            mode: s.command ? "command" : "dictate",
+            mode: s.command && gpt == nil ? "command" : "dictate",
             durationSeconds: rec.duration,
             language: prefs.language,
             vocabulary: prefs.vocabularyTerms,
             destination: s.focus.destination.rawValue,
             appName: s.focus.appName,
             contextBefore: prefs.useContext ? s.focus.textBeforeCursor : nil,
-            selection: s.command ? selection : nil,
-            cleanup: prefs.cleanupEnabled)
+            selection: s.command && gpt == nil ? selection : nil,
+            cleanup: prefs.cleanupEnabled && gpt == nil)
         do {
             let r = try await Account.shared.client.dictate(fileURLs: rec.parts, meta: meta)
             Account.shared.update(usage: r.usage)
             onStateChange?()
+            if let gpt { return try await finish(raw: r.raw, engine: "oneshot + chatgpt", s: s, selection: selection, with: gpt) }
             return Outcome(raw: r.raw, text: r.text, mode: r.mode, engine: "oneshot")
         } catch let e as URLError where appleFallbackOK && !s.command {
             NSLog("Oneshot: server unreachable (\(e.code.rawValue)), transcribing on-device")
@@ -437,31 +444,57 @@ final class AppController: ObservableObject {
         }
     }
 
-    /// Own OpenAI key or on-device engine: transcribe here, then clean up with OpenAI if a key is set.
+    /// Own OpenAI key or on-device engine: transcribe here, then clean up with the ChatGPT plan or the OpenAI key.
     private func viaDirect(rec: Recording, s: Session, selection: String?) async throws -> Outcome {
         let (raw0, engineName) = try await transcribe(parts: rec.parts)
         let raw = raw0.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty else { return Outcome(raw: "", text: "", mode: "dictate", engine: engineName) }
-        let client = prefs.effectiveAPIKey.map { OpenAIClient(apiKey: $0) }
-        if s.command, let client {
-            let text = try await Cleaner(client: client).command(
-                instruction: raw, selection: selection, destination: s.focus.destination,
-                appName: s.focus.appName, model: prefs.commandModel)
-            return Outcome(raw: raw, text: text, mode: "command", engine: engineName)
+        if let gpt = chatGPTModel() { return try await finish(raw: raw, engine: engineName + " + chatgpt", s: s, selection: selection, with: gpt) }
+        if let key = prefs.effectiveAPIKey {
+            let m = TextBackend(client: OpenAIClient(apiKey: key), cleanupModel: prefs.cleanupModel, commandModel: prefs.commandModel, isChatGPT: false)
+            return try await finish(raw: raw, engine: engineName, s: s, selection: selection, with: m)
         }
-        var text = raw
-        if prefs.cleanupEnabled, let client {
+        return Outcome(raw: raw, text: raw, mode: "dictate", engine: engineName)
+    }
+
+    private struct TextBackend { let client: any TextModel; let cleanupModel: String; let commandModel: String; let isChatGPT: Bool }
+
+    /// The user's ChatGPT plan, when connected and allowed.
+    private func chatGPTModel() -> TextBackend? {
+        let gpt = ChatGPTAccount.shared
+        guard gpt.ready, !gpt.selectedModel.isEmpty else { return nil }
+        return TextBackend(client: gpt.client(), cleanupModel: gpt.selectedModel, commandModel: gpt.selectedModel, isChatGPT: true)
+    }
+
+    /// Cleanup or Command mode on a raw transcript. A failed cleanup keeps the raw text; a failed command throws.
+    private func finish(raw: String, engine: String, s: Session, selection: String?, with m: TextBackend) async throws -> Outcome {
+        let raw = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else { return Outcome(raw: "", text: "", mode: "dictate", engine: engine) }
+        if s.command {
             do {
-                let cleaned = try await Cleaner(client: client).clean(
-                    raw: raw, destination: s.focus.destination, appName: s.focus.appName,
-                    contextBefore: prefs.useContext ? s.focus.textBeforeCursor : nil,
-                    vocabulary: prefs.vocabularyTerms, model: prefs.cleanupModel)
-                if !cleaned.isEmpty, !Cleaner.looksLikeDrift(raw: raw, cleaned: cleaned) { text = cleaned }
+                let text = try await Cleaner(client: m.client).command(
+                    instruction: raw, selection: selection, destination: s.focus.destination,
+                    appName: s.focus.appName, model: m.commandModel)
+                return Outcome(raw: raw, text: text, mode: "command", engine: engine)
             } catch {
-                NSLog("Oneshot cleanup failed, using raw transcript: \(error)")
+                if m.isChatGPT { ChatGPTAccount.shared.note(error) }
+                throw error
             }
         }
-        return Outcome(raw: raw, text: text, mode: "dictate", engine: engineName)
+        guard prefs.cleanupEnabled else { return Outcome(raw: raw, text: raw, mode: "dictate", engine: engine) }
+        do {
+            let cleaned = try await Cleaner(client: m.client).clean(
+                raw: raw, destination: s.focus.destination, appName: s.focus.appName,
+                contextBefore: prefs.useContext ? s.focus.textBeforeCursor : nil,
+                vocabulary: prefs.vocabularyTerms, model: m.cleanupModel)
+            let text = !cleaned.isEmpty && !Cleaner.looksLikeDrift(raw: raw, cleaned: cleaned) ? cleaned : raw
+            return Outcome(raw: raw, text: text, mode: "dictate", engine: engine)
+        } catch {
+            NSLog("Oneshot cleanup failed, using raw transcript: \(error.localizedDescription)")
+            if m.isChatGPT { ChatGPTAccount.shared.note(error) }
+            let note: String? = (error as? ChatGPTError).map { e in if case .usageLimit = e { return "ChatGPT limit reached, not cleaned up" }; return "not cleaned up" }
+            return Outcome(raw: raw, text: raw, mode: "dictate", engine: engine, note: note)
+        }
     }
 
     /// Transcribes every part (in parallel with OpenAI, in order on-device) and joins the text.

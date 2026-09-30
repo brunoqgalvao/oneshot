@@ -211,6 +211,7 @@ private struct HomePage: View {
                     }
                     .font(.system(size: 14)).foregroundColor(.secondary)
                     .staggerIn(1)
+                    UsingChatGPTPlanLine().staggerIn(1)
                 }
 
                 if let v = updater.available {
@@ -221,6 +222,9 @@ private struct HomePage: View {
                 }
                 if !pending.items.isEmpty {
                     PendingBanner(count: pending.items.count) { nav.page = .history }.staggerIn(2)
+                }
+                if account.isSignedIn || prefs.engine != .cloud {
+                    ChatGPTInviteBanner().staggerIn(2)
                 }
 
                 if history.items.isEmpty {
