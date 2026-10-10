@@ -23,7 +23,7 @@ final class OnboardingModel: ObservableObject {
             switch prefs.engine {
             case .cloud: return Account.shared.isSignedIn
             case .openAI: return prefs.effectiveAPIKey != nil
-            case .apple: return true
+            case .apple, .parakeet: return true
             }
         case .microphone: return AudioRecorder.permission == .authorized
         case .accessibility: return AXIsProcessTrusted() && AppController.shared.hotkeyActive

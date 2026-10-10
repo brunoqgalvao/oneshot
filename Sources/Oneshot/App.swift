@@ -65,6 +65,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         onboarding.model.onFinish = { [weak self] in self?.finishOnboarding() }
         controller.start()
         _ = ChatGPTAccount.shared   // load the ChatGPT account and its models now, before the first dictation
+        if Prefs.shared.engine == .parakeet { Parakeet.shared.warm() }
         Task { await Account.shared.refresh(); self.statusMenu?.refresh() }
 
         indicator.onClick = { [weak self] in
@@ -250,7 +251,7 @@ enum Demo {
 
 /// Command-line helpers for testing without the microphone:
 ///   Oneshot --signup|--login <email> <password>
-///   Oneshot --transcribe <audio file> [--app <bundle id>]
+///   Oneshot --transcribe <audio file> [--app <bundle id>] [--engine cloud|openAI|parakeet]
 @MainActor
 enum CLI {
     /// Lists the connected ChatGPT account's models and cleans up a sample transcript on its plan. Never prints tokens.
@@ -315,7 +316,19 @@ enum CLI {
                 let bytes = rec.parts.reduce(0) { $0 + ((try? FileManager.default.attributesOfItem(atPath: $1.path)[.size] as? Int) ?? 0) }
                 let dest = Destination.classify(bundleID: bundleID, appName: bundleID, windowTitle: nil)
                 print("audio:     \(String(format: "%.1f", rec.duration))s -> \(rec.parts.count) \(file.pathExtension) part(s), \(bytes / 1024) KB, destination \(dest)")
-                if prefs.engine == .cloud {
+                let engine = CommandLine.arguments.firstIndex(of: "--engine")
+                    .flatMap { $0 + 1 < CommandLine.arguments.count ? Engine(rawValue: CommandLine.arguments[$0 + 1]) : nil } ?? prefs.engine
+                if engine == .parakeet {
+                    _ = try await Parakeet.shared.prepare()   // downloads the model the first time
+                    let t1 = Date()
+                    var texts: [String] = []
+                    for url in rec.parts { texts.append(try await Parakeet.shared.transcribe(url: url)) }
+                    print("engine:    parakeet-tdt-0.6b-v3 on-device (\(Parakeet.modelDir.path))")
+                    print("raw:       \(texts.joined(separator: " "))")
+                    print("timing:    load \(String(format: "%.2f", t1.timeIntervalSince(t0)))s, transcribe \(String(format: "%.2f", Date().timeIntervalSince(t1)))s")
+                    exit(0)
+                }
+                if engine == .cloud {
                     guard Account.shared.isSignedIn else { throw CloudError.server(status: 401, code: "unauthorized", message: "Run --login first") }
                     let meta = DictateMeta(mode: "dictate", durationSeconds: rec.duration, language: prefs.language,
                                            vocabulary: prefs.vocabularyTerms, destination: dest.rawValue, appName: bundleID,

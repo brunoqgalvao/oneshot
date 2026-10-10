@@ -229,7 +229,10 @@ struct AccountPane: View {
             Section {
                 VStack(spacing: 8) {
                     ForEach(Engine.allCases) { e in
-                        EngineCard(engine: e, selected: prefs.engine == e) { withAnimation(Brand.spring) { prefs.engine = e } }
+                        EngineCard(engine: e, selected: prefs.engine == e) {
+                            withAnimation(Brand.spring) { prefs.engine = e }
+                            if e == .parakeet { Parakeet.shared.warm() }
+                        }
                     }
                     Divider().padding(.horizontal, 10)
                     ChatGPTAccountRow()
@@ -270,10 +273,12 @@ struct AccountPane: View {
                     if AppleTranscriber.status != .authorized {
                         Button("Allow Speech Recognition") { AppleTranscriber.requestPermission { _ in } }
                     }
+                case .parakeet:
+                    ParakeetSection()
                 }
             } header: { Text(prefs.engine == .cloud ? "Oneshot account" : prefs.engine == .openAI ? "OpenAI" : "On-device") }
 
-            if prefs.engine != .apple {
+            if !prefs.engine.onDevice {
                 Section {
                     Toggle(isOn: $prefs.offlineFallback) {
                         VStack(alignment: .leading, spacing: 2) {
@@ -308,6 +313,41 @@ struct AccountPane: View {
     }
 }
 
+private struct ParakeetSection: View {
+    @ObservedObject private var parakeet = Parakeet.shared
+
+    var body: some View {
+        Text("Parakeet TDT v3 runs on this Mac's Neural Engine and detects the language by itself. Audio never leaves this Mac. Connect ChatGPT above (or add an OpenAI key) for cleanup and Command mode.")
+            .font(.system(size: 12)).foregroundColor(.secondary)
+        HStack(spacing: 10) {
+            switch parakeet.state {
+            case .missing:
+                Text("Model not downloaded (480 MB)").font(.system(size: 12))
+                Spacer()
+                Button("Download") { parakeet.warm() }
+            case .downloading(let p):
+                ProgressView(value: p).frame(maxWidth: 220)
+                Text("Downloading… \(Int(p * 100))%").font(.system(size: 12)).foregroundColor(.secondary)
+                Spacer()
+            case .loading:
+                ProgressView().controlSize(.small)
+                Text("Loading the model…").font(.system(size: 12)).foregroundColor(.secondary)
+                Spacer()
+            case .downloaded, .ready:
+                StatusDot(ok: true)
+                Text(parakeet.state == .ready ? "Ready" : "Downloaded").font(.system(size: 12))
+                Spacer()
+                Button("Delete model") { parakeet.delete() }.controlSize(.small)
+            case .failed(let message):
+                Image(systemName: "exclamationmark.triangle.fill").foregroundColor(.orange)
+                Text(message).font(.system(size: 12)).foregroundColor(.secondary).lineLimit(2)
+                Spacer()
+                Button("Try again") { parakeet.warm() }
+            }
+        }
+    }
+}
+
 private struct EngineCard: View {
     let engine: Engine
     let selected: Bool
@@ -319,6 +359,7 @@ private struct EngineCard: View {
         case .cloud: return ("sparkles", "Oneshot account", "Free. Best accuracy and cleanup, nothing to set up.")
         case .openAI: return ("key.fill", "Your own OpenAI key", "Calls OpenAI directly; billed to your account.")
         case .apple: return ("lock.fill", "On this Mac", "Audio stays on this Mac. Less accurate; cleanup needs ChatGPT or a key.")
+        case .parakeet: return ("cpu", "Parakeet (on-device)", "NVIDIA's open model on the Neural Engine, 25 languages. One-time 480 MB download.")
         }
     }
 

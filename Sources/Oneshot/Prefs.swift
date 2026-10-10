@@ -62,15 +62,17 @@ enum TriggerKey: String, CaseIterable, Identifiable {
 }
 
 enum Engine: String, CaseIterable, Identifiable {
-    case cloud, openAI, apple
+    case cloud, openAI, apple, parakeet
     var id: String { rawValue }
     var label: String {
         switch self {
         case .cloud: return "Oneshot account (free)"
         case .openAI: return "Your own OpenAI key"
         case .apple: return "On this Mac (private, offline)"
+        case .parakeet: return "Parakeet (on-device)"
         }
     }
+    var onDevice: Bool { self == .apple || self == .parakeet }
 }
 
 /// User preferences, persisted in UserDefaults. The API key lives in a 0600 file
