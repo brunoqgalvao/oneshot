@@ -22,7 +22,7 @@ curl -fsSL https://oneshot.agenturl.dev/install.sh | sh
 - Adapts to where you type: casual in chat, full sentences in email, exact in code and AI prompts.
 - Your vocabulary (names, products, jargon) is spelled your way.
 - Every dictation stays on your clipboard and in your history.
-- Free (30 minutes a week), your own OpenAI key (unlimited), or fully on-device with Apple's speech recognition.
+- Free (30 minutes a week), your own OpenAI key (unlimited), or fully on-device with Apple's speech recognition or NVIDIA Parakeet TDT v3 (25 languages, one-time 480 MB download, via [FluidAudio](https://github.com/FluidInference/FluidAudio)).
 - Sign in with ChatGPT to run cleanup and Command mode on your own ChatGPT plan ([Sign in with ChatGPT](https://developers.openai.com/siwc/token-sharing-open-source)). Transcription still uses the Oneshot server, your key or the Mac, because ChatGPT plans only cover the Responses API.
 - Feedback inside the app goes to an AI engineer (Claude Opus) that runs in a loop on this repo: it ships what it can and replies to you in the app. Oneshot updates itself.
 
@@ -33,7 +33,7 @@ curl -fsSL https://oneshot.agenturl.dev/install.sh | sh
                                                               └─▶ gpt-5.4-mini cleanup ─▶ ⌘V into the focused app
 ```
 
-- **App** (`Sources/Oneshot`, Swift + SwiftUI, no dependencies): menu bar app with a floating HUD, an always-on indicator, onboarding, and a home window with history, dictionary, style and feedback. Reads the text around the cursor with the Accessibility API for context (never password fields).
+- **App** (`Sources/Oneshot`, Swift + SwiftUI, one dependency: FluidAudio for Parakeet): menu bar app with a floating HUD, an always-on indicator, onboarding, and a home window with history, dictionary, style and feedback. Reads the text around the cursor with the Accessibility API for context (never password fields).
 - **Server** (`server/`, Bun + SQLite, no dependencies): accounts (email/password or Google), weekly free allowance, a global cost cap and a spend dashboard at /admin, transcription + cleanup in one request, feedback, and the website. Deployed on Fly.io.
 
 ## Build it yourself

@@ -246,6 +246,7 @@ final class AppController: ObservableObject {
         case .cloud: CloudClient.prewarm(prefs.serverURL)
         case .openAI: OpenAIClient.prewarm()
         case .apple: break
+        case .parakeet: Parakeet.shared.warm()
         }
         if fake != nil { startFakeLevels() }
         // Recordings stop by themselves at the 3-hour limit.
@@ -355,7 +356,7 @@ final class AppController: ObservableObject {
             let out: Outcome
             switch prefs.engine {
             case .cloud: out = try await viaCloud(rec: rec, s: s, selection: selection)
-            case .openAI, .apple: out = try await viaDirect(rec: rec, s: s, selection: selection)
+            case .openAI, .apple, .parakeet: out = try await viaDirect(rec: rec, s: s, selection: selection)
             }
 
             let raw = out.raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -444,7 +445,7 @@ final class AppController: ObservableObject {
         }
     }
 
-    /// Own OpenAI key or on-device engine: transcribe here, then clean up with the ChatGPT plan or the OpenAI key.
+    /// Own OpenAI key or an on-device engine: transcribe here, then clean up with the ChatGPT plan or the OpenAI key.
     private func viaDirect(rec: Recording, s: Session, selection: String?) async throws -> Outcome {
         let (raw0, engineName) = try await transcribe(parts: rec.parts)
         let raw = raw0.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -503,6 +504,9 @@ final class AppController: ObservableObject {
         if prefs.engine == .apple {
             return (try await appleTranscribe(parts), "apple")
         }
+        if prefs.engine == .parakeet {
+            return (try await parakeetTranscribe(parts), "parakeet")
+        }
         guard let key = prefs.effectiveAPIKey else {
             if appleFallbackOK { return (try await appleTranscribe(parts), "apple") }
             throw OneshotError.noAPIKey
@@ -544,6 +548,15 @@ final class AppController: ObservableObject {
         var texts: [String] = []
         for url in parts {
             let t = try await apple.transcribe(url: url, language: prefs.language, vocabulary: prefs.vocabularyTerms)
+            if !t.isEmpty { texts.append(t) }
+        }
+        return texts.joined(separator: " ")
+    }
+
+    private func parakeetTranscribe(_ parts: [URL]) async throws -> String {
+        var texts: [String] = []
+        for url in parts {
+            let t = try await Parakeet.shared.transcribe(url: url).trimmingCharacters(in: .whitespacesAndNewlines)
             if !t.isEmpty { texts.append(t) }
         }
         return texts.joined(separator: " ")

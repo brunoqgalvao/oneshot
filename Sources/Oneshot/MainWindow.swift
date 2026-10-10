@@ -159,6 +159,7 @@ private struct SidebarFooter: View {
 
     private var title: String {
         if prefs.engine == .cloud { return account.email ?? "Not signed in" }
+        if prefs.engine == .parakeet { return "Parakeet on this Mac" }
         return prefs.engine == .openAI ? "Your OpenAI key" : "On this Mac"
     }
     private var initial: String { String((account.email ?? NSFullUserName()).prefix(1)).uppercased() }
